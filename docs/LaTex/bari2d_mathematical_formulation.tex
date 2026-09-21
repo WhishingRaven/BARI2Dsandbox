@@ -1,0 +1,1003 @@
+% !TeX program = xelatex
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[a4paper,margin=24mm]{geometry}
+\usepackage{kotex}
+\usepackage{amsmath,amssymb,mathtools,bm}
+\usepackage{booktabs,longtable,array}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{hyperref}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!55!black,
+  urlcolor=blue!55!black,
+  pdftitle={BARI2D 수학적 정식화},
+  pdfauthor={BARI2D Project}
+}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\I}{\mathbb{I}}
+\newcommand{\Ftarget}{F_{\mathrm{target}}}
+\newcommand{\Fcap}{F_{\mathrm{cap}}}
+\newcommand{\Pspan}{P_{\mathrm{span}}}
+\newcommand{\Ispan}{I_{\mathrm{span}}}
+\newcommand{\Gcontact}{\mathcal{G}_{\mathrm{contact}}}
+\newcommand{\norm}[1]{\left\lVert #1\right\rVert}
+\newcommand{\clip}{\operatorname{clip}}
+\newcommand{\concat}{\operatorname{concat}}
+\newcommand{\sigmoid}{\operatorname{sigmoid}}
+\newcommand{\softmax}{\operatorname{softmax}}
+\newcommand{\MSE}{\operatorname{MSE}}
+
+\title{\textbf{BARI2D 수학적 정식화}\\[4pt]
+\large 분산 다중 로봇 교량 건설의 상태, 동역학, 구조 용량 및 MAPPO 목적}
+\author{BARI2D Project}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+이 문서는 BARI2D 구현의 수학적 구조를 정리한다. 환경 좌표계, 로봇 상태와 이산 동역학, 국소 감각, 방향성 사각형 접촉, 앵커 파손, 기계 접촉 그래프, 제방 간 연결도, 그래프 기반 하중 용량, 기능 보상, 생물 영감형 공유 정책, 중앙 비평가와 순환형 MAPPO 목적을 정의한다. 본 정식화의 핵심 제약은 분산 행위자가 전역 지도, 전역 위치, 접촉 그래프와 현재 구조 용량을 관측하지 않는다는 것이다. 특정 교량 형상이나 트러스 토폴로지는 목적 함수에 포함하지 않는다.
+\end{abstract}
+
+\tableofcontents
+
+\newpage
+
+\section{문제 정의}
+
+\subsection{다중 로봇 협동 문제}
+
+로봇 집합을
+\begin{equation}
+  \mathcal{R}=\{1,\ldots,N\}, \qquad N\approx 20
+\end{equation}
+으로 둔다. 모든 로봇은 동일한 물리 파라미터와 정책 파라미터 \(\theta\)를 공유한다. 에피소드마다 목표 하중은
+\begin{equation}
+  \Ftarget \sim p_F(F), \qquad
+  F\in[F_{\min},F_{\max}]
+\end{equation}
+에서 샘플링된다.
+
+로봇 \(i\)의 분산 정책은
+\begin{equation}
+  a_i^t \sim
+  \pi_\theta\!\left(
+    a_i^t\mid o_i^t,h_i^t,\Ftarget
+  \right)
+  \label{eq:decentralized-policy}
+\end{equation}
+로 정의한다. \(o_i^t\)는 국소 관측, \(h_i^t\)는 순환 은닉 상태다. 실행 중 중앙 제어기는 존재하지 않는다.
+
+\subsection{최적화 목표}
+
+기능적 목표는 다음의 다목적 최적화로 해석할 수 있다.
+\begin{equation}
+  \max_\theta\;
+  \mathbb{E}_{\tau\sim\pi_\theta}
+  \left[
+    w_s S(\tau)
+    -w_T T(\tau)
+    -w_E E(\tau)
+    -w_R N_{\mathrm{used}}(\tau)
+  \right],
+  \label{eq:global-objective}
+\end{equation}
+여기서 성공 지표는
+\begin{equation}
+  S(\tau)=
+  \I\!\left[
+    \Ispan(\tau)=1
+    \;\land\;
+    \Fcap(\tau)\ge\Ftarget
+  \right]
+  \label{eq:success}
+\end{equation}
+이다. 목적식에는 특정 형상, 각도 또는 토폴로지 항이 없다.
+
+\section{필드와 간극 기하}
+
+\subsection{전역 영역}
+
+시뮬레이션 영역은
+\begin{equation}
+  \Omega=[0,L_x]\times[0,L_y]\subset\R^2
+\end{equation}
+다. 간극 중심을 \(\bm{c}\in\R^2\), 간극을 가로지르는 단위 법선을
+\begin{equation}
+  \bm{n}=
+  \begin{bmatrix}
+    \cos\psi\\ \sin\psi
+  \end{bmatrix}
+\end{equation}
+로 둔다. 접선은
+\begin{equation}
+  \bm{t}=
+  \begin{bmatrix}
+    -\sin\psi\\ \cos\psi
+  \end{bmatrix}
+\end{equation}
+다.
+
+점 \(\bm{p}\in\Omega\)의 간극 좌표는
+\begin{align}
+  s(\bm{p}) &= (\bm{p}-\bm{c})^\top\bm{n},\\
+  q(\bm{p}) &= (\bm{p}-\bm{c})^\top\bm{t}.
+\end{align}
+
+\subsection{불규칙 경계}
+
+간극 폭을 \(w\), 경계 섭동 진폭을 \(A\), 공간 주파수를 \(\omega\), 위상을 \(\phi\)라 하면 양쪽 경계는
+\begin{align}
+  b_L(q) &= -\frac{w}{2}+A\sin(\omega q+\phi),\\
+  b_R(q) &=  \frac{w}{2}+A\sin(\omega q+\phi)
+\end{align}
+로 정의한다. 제방 및 간극 집합은
+\begin{align}
+  \Omega_L &= \{\bm{p}\in\Omega:s(\bm{p})\le b_L(q(\bm{p}))\},\\
+  \Omega_R &= \{\bm{p}\in\Omega:s(\bm{p})\ge b_R(q(\bm{p}))\},\\
+  \Omega_G &= \Omega\setminus(\Omega_L\cup\Omega_R)
+\end{align}
+이다.
+
+점의 정규화 간극 진행도는
+\begin{equation}
+  \rho(\bm{p})=
+  \clip\!\left(
+    \frac{s(\bm{p})-b_L(q(\bm{p}))}
+         {b_R(q(\bm{p}))-b_L(q(\bm{p}))},
+    0,1
+  \right)
+  \label{eq:point-progress}
+\end{equation}
+로 둔다.
+
+\section{로봇 상태와 동역학}
+
+\subsection{상태 벡터}
+
+로봇 \(i\)의 물리 및 내부 상태를
+\begin{equation}
+  x_i^t=
+  \left(
+    \bm{p}_i^t,\theta_i^t,v_i^t,\delta_i^t,
+    \ell_i^t,b_i^t,\varepsilon_i^t,
+    a_i^{t-1},k_i^t,f_i^t
+  \right)
+\end{equation}
+로 둔다. 각 성분은 다음과 같다.
+
+\begin{center}
+\begin{tabular}{cl}
+\toprule
+기호 & 의미\\
+\midrule
+\(\bm{p}_i=(x_i,y_i)\) & 중심 위치\\
+\(\theta_i\) & 방향각\\
+\(v_i\) & 전진/후진 속도\\
+\(\delta_i\) & 조향각\\
+\(\ell_i\in\{0,1\}\) & 헤드 리프트 상태\\
+\(b_i\in\{0,1\}\) & 앵커 상태\\
+\(\varepsilon_i\ge0\) & 국소 변형률/하중 추정\\
+\(a_i^{t-1}\) & 이전 행동\\
+\(k_i\in\{0,\ldots,K\}\) & 2.5D 높이 레이어\\
+\(f_i\in\{0,1\}\) & 낙하 상태\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{평면 운동학}
+
+로봇 진행 단위벡터는
+\begin{equation}
+  \bm{d}(\theta_i)=
+  \begin{bmatrix}
+    \cos\theta_i\\ \sin\theta_i
+  \end{bmatrix}
+\end{equation}
+다. 이산 이동 명령에서 속도 명령 \(u_{v,i}^t\in[-1,1]\), 조향 명령 \(u_{\delta,i}^t\in[-1,1]\)을 얻는다. 구동 잡음은
+\begin{equation}
+  \widetilde{u}_{v,i}^t
+  =\clip(u_{v,i}^t+\eta_{v,i}^t,-1,1),
+  \qquad
+  \eta_{v,i}^t\sim\mathcal{N}(0,\sigma_a^2)
+\end{equation}
+로 표현한다. 조향도 같은 방식으로 잡음을 추가한다.
+
+운동학 업데이트는
+\begin{align}
+  v_i^{t+1}
+    &=v_{\max}\widetilde{u}_{v,i}^t,\\
+  \delta_i^{t+1}
+    &=\delta_{\max}\widetilde{u}_{\delta,i}^t,\\
+  \theta_i^{t+1}
+    &=\operatorname{wrap}\!\left(
+      \theta_i^t+
+      \omega_{\max}\widetilde{u}_{\delta,i}^t\Delta t
+    \right),\\
+  \bm{p}_i^{t+1}
+    &=\bm{p}_i^t+
+      v_i^{t+1}\bm{d}(\theta_i^{t+1})\Delta t
+  \label{eq:kinematics}
+\end{align}
+다.
+
+이동 에너지 프록시는
+\begin{equation}
+  \Delta E_i^t=
+  |v_i^{t+1}|\Delta t+
+  c_\delta|\delta_i^{t+1}|\Delta t
+\end{equation}
+로 누적한다. 등반 시에는
+\begin{equation}
+  \Delta E_{i,\mathrm{climb}}=m_i g_{\mathrm{proxy}}h_c
+\end{equation}
+에 대응하는 질량--높이 프록시를 추가한다.
+
+\subsection{이산 등반}
+
+로봇 \(j\)가 로봇 \(i\)의 진행 방향 앞에 있고
+\begin{equation}
+  \norm{\bm{p}_j-\bm{p}_i}\le r_c,
+  \qquad
+  (\bm{p}_j-\bm{p}_i)^\top\bm{d}(\theta_i)>0
+\end{equation}
+이면 \(j\)는 \(i\)의 등반 지지가 될 수 있다. 등반 업데이트는
+\begin{equation}
+  k_i^{t+1}=
+  \min(k_j^t+1,K)
+\end{equation}
+다. 이는 연속 \(z\)축 강체 운동 대신 사용하는 2.5D 근사다.
+
+\section{국소 센서와 관측}
+
+\subsection{IR 광선}
+
+로봇 \(i\)의 \(r\)번째 센서 상대각을 \(\alpha_r\)라 하면 광선은
+\begin{equation}
+  \bm{r}_{i,r}(\lambda)=
+  \bm{p}_i+
+  \lambda\bm{d}(\theta_i+\alpha_r),
+  \qquad
+  \lambda\in[0,D_{\max}]
+\end{equation}
+다. 검출 집합을 다른 로봇, 장애물, 필드 경계와 지지면 전이의 합집합 \(\mathcal{O}_i^t\)라 두면
+\begin{equation}
+  d_{i,r}^t=
+  \min\left\{
+    \lambda\in[0,D_{\max}]
+    :\bm{r}_{i,r}(\lambda)\in\mathcal{O}_i^t
+  \right\}.
+\end{equation}
+검출이 없으면 \(d_{i,r}^t=D_{\max}\)다. 정책 입력은
+\begin{equation}
+  \bar d_{i,r}^t=
+  \clip\!\left(
+    \frac{d_{i,r}^t+\eta_{i,r}^t}{D_{\max}},
+    0,1
+  \right)
+\end{equation}
+이며 \(\eta_{i,r}^t\sim\mathcal{N}(0,\sigma_s^2)\)다.
+
+\subsection{변형률}
+
+로봇 \(i\)와 연결된 접촉 및 앵커 간선 집합을
+\(\mathcal{E}_i^t\)라 두면 국소 하중은
+\begin{equation}
+  \varepsilon_i^t=
+  \sum_{e\in\mathcal{E}_i^t}|F_e^t|
+\end{equation}
+로 근사한다. 정규화 입력은
+\begin{equation}
+  \bar\varepsilon_i^t=
+  \clip\!\left(
+    \frac{\varepsilon_i^t+\eta_{\varepsilon,i}^t}
+         {F_{\mathrm{scale}}},
+    0,\varepsilon_{\max}
+  \right)
+\end{equation}
+다.
+
+\subsection{시간 이력과 관측 벡터}
+
+길이 \(H\)의 이력은
+\begin{align}
+  D_i^t &=
+  [\bar{\bm d}_i^{t-H+1},\ldots,\bar{\bm d}_i^t],\\
+  E_i^t &=
+  [\bar\varepsilon_i^{t-H+1},\ldots,\bar\varepsilon_i^t],\\
+  A_i^t &=
+  [\bar a_i^{t-H},\ldots,\bar a_i^{t-1}]
+\end{align}
+다. 내부 상태를
+\begin{equation}
+  s_{i,\mathrm{int}}^t=
+  \left[
+    b_i^t,\ell_i^t,
+    \frac{v_i^t}{v_{\max}},
+    \frac{\delta_i^t}{\delta_{\max}},
+    \frac{k_i^t}{K},
+    f_i^t
+  \right]
+\end{equation}
+로 두면 최종 국소 관측은
+\begin{equation}
+  o_i^t=
+  \concat\!\left(
+    D_i^t,E_i^t,A_i^t,
+    s_{i,\mathrm{int}}^t,
+    \frac{\Ftarget}{F_{\mathrm{norm}}},
+    z_i
+  \right).
+  \label{eq:local-observation}
+\end{equation}
+여기서
+\begin{equation}
+  z_i\sim\mathcal{N}(0,\sigma_z^2I)
+\end{equation}
+는 에피소드 시작 시 한 번 샘플링하며 기본값은 \(\sigma_z=0\)이다.
+
+\section{접촉 역학과 앵커}
+
+\subsection{방향성 사각형 접촉}
+
+로봇 \(i\)의 방향성 사각형을 \(\mathcal{B}_i\)라 하자. 두 사각형의 모서리 법선에서 얻은 분리축 집합을 \(\mathcal{A}_{ij}\)라 두면
+\begin{equation}
+  \mathcal{B}_i\cap\mathcal{B}_j\ne\varnothing
+  \iff
+  \forall\bm{a}\in\mathcal{A}_{ij},\;
+  \operatorname{proj}_{\bm a}(\mathcal{B}_i)
+  \cap
+  \operatorname{proj}_{\bm a}(\mathcal{B}_j)
+  \ne\varnothing.
+\end{equation}
+
+축 \(\bm a\)의 겹침 길이를 \(\delta_{\bm a}\)라 하면 최소 침투와 접촉 법선은
+\begin{equation}
+  \delta_{ij}=\min_{\bm a\in\mathcal{A}_{ij}}\delta_{\bm a},
+  \qquad
+  \bm n_{ij}=
+  \arg\min_{\bm a\in\mathcal{A}_{ij}}\delta_{\bm a}.
+\end{equation}
+법선 접촉력 프록시는
+\begin{equation}
+  F_{n,ij}=
+  \max\!\left(
+    0,\,
+    k_n\delta_{ij}
+    +c_n|v_i-v_j|
+  \right)
+  \label{eq:normal-force}
+\end{equation}
+다. 위치 보정 후 속도는 마찰 계수 \(\mu\)로 감쇠한다.
+
+\subsection{앵커 힘과 파손}
+
+로봇 \(i\)와 상대 \(j\) 사이 앵커의 현재 상대벡터를
+\begin{equation}
+  \bm r_{ij}=\bm p_j-\bm p_i,
+  \qquad
+  d_{ij}=\norm{\bm r_{ij}}
+\end{equation}
+로 둔다. 생성 시 기준 거리를 \(d_{ij}^0\)라 하면 축력은
+\begin{equation}
+  F_{\mathrm{axial}}=
+  k_a(d_{ij}-d_{ij}^0)
+\end{equation}
+이다. \(F_{\mathrm{axial}}>0\)이면 인장, 음수면 압축이다.
+
+앵커 방향 단위벡터
+\(\widehat{\bm r}_{ij}=\bm r_{ij}/d_{ij}\)를 이용한 전단 프록시는
+\begin{equation}
+  F_{\mathrm{shear}}=
+  c_s\left|
+    d_x(\theta_i)\widehat r_{ij,y}
+    -d_y(\theta_i)\widehat r_{ij,x}
+  \right|
+\end{equation}
+다. 선택적 회전 항은
+\begin{equation}
+  M_{\mathrm{rot}}=k_{\mathrm{rot}}|\Delta\theta_{ij}|
+\end{equation}
+이다.
+
+앵커 파손 지표는
+\begin{equation}
+  \chi_{ij}^{\mathrm{fail}}=
+  \I\!\left[
+    F_{\mathrm{axial}}>F_T
+    \;\lor\;
+    -F_{\mathrm{axial}}>F_C
+    \;\lor\;
+    F_{\mathrm{shear}}>F_S
+  \right]
+  \label{eq:anchor-failure}
+\end{equation}
+다. 확률 파손을 사용할 경우 베르누이 항을 추가한다.
+
+\section{기계 접촉 그래프}
+
+\subsection{그래프 정의}
+
+시간 \(t\)의 기계 그래프는
+\begin{equation}
+  \Gcontact^t=(\mathcal{V},\mathcal{E}^t)
+\end{equation}
+이며
+\begin{equation}
+  \mathcal{V}=
+  \mathcal{R}\cup\{L,R\}
+\end{equation}
+다. \(L,R\)은 왼쪽 및 오른쪽 제방 노드다.
+
+각 간선 \(e=(u,v)\)는
+\begin{equation}
+  \xi_e=
+  (\tau_e,c_e,k_e,F_e,\Delta\bm p_e,\Delta\theta_e)
+\end{equation}
+를 갖는다. \(\tau_e\)는 접촉, 앵커 또는 제방 접촉 유형이고 \(c_e\)는 용량, \(k_e\)는 강성이다.
+
+\subsection{횡단 판정}
+
+\(L\)에서 도달 가능한 노드 집합을
+\begin{equation}
+  \mathcal{C}_L^t=
+  \operatorname{Reachable}(\Gcontact^t,L)
+\end{equation}
+라 하면
+\begin{equation}
+  \Ispan^t=
+  \I[R\in\mathcal{C}_L^t]
+  \label{eq:span-indicator}
+\end{equation}
+다.
+
+연속 진행도는
+\begin{equation}
+  \Pspan^t=
+  \max_{i\in\mathcal{C}_L^t\cap\mathcal{R}}
+  \rho(\bm p_i^t),
+  \label{eq:span-progress}
+\end{equation}
+이며 연결 로봇이 없으면 0이다.
+
+\subsection{지지 상실}
+
+양쪽 제방에 연결된 로봇 집합을
+\begin{equation}
+  \mathcal{S}^t=
+  \operatorname{Reachable}(\Gcontact^t,L)
+  \cup
+  \operatorname{Reachable}(\Gcontact^t,R)
+\end{equation}
+로 둔다. 로봇 중심이 \(\Omega_G\)에 있고 몸체가 제방과 접촉하지 않으며
+\(i\notin\mathcal{S}^t\)이면 낙하 상태로 전환한다.
+
+\section{하중 용량}
+
+\subsection{간선 용량 최대 유량}
+
+그래프의 비음수 유량 \(f_{uv}\)에 대해 용량 제약은
+\begin{equation}
+  0\le f_{uv}\le c_{uv}
+\end{equation}
+이고 중간 노드의 유량 보존은
+\begin{equation}
+  \sum_{u:(u,v)\in\mathcal{E}}f_{uv}
+  =
+  \sum_{w:(v,w)\in\mathcal{E}}f_{vw}
+\end{equation}
+다.
+
+중앙 하중 노드 \(m\)에서 각 제방으로 전달 가능한 최대 유량을
+\begin{align}
+  \Phi_L(m)&=\operatorname{MaxFlow}(m,L\mid R\ \text{차단}),\\
+  \Phi_R(m)&=\operatorname{MaxFlow}(m,R\mid L\ \text{차단})
+\end{align}
+로 정의한다. 한 연결 구성요소의 양측 지지 용량은
+\begin{equation}
+  F_{\mathrm{flow}}^{(c)}
+  =
+  2\min\{\Phi_L(m_c),\Phi_R(m_c)\}
+  \label{eq:component-flow}
+\end{equation}
+다. \(m_c\)는 해당 구성요소에서 \(|\rho(\bm p_i)-1/2|\)가 최소인 로봇이다.
+
+균등 분산 하중에서는 모든 독립 횡단 구성요소 \(\mathcal{C}_{\mathrm{span}}\)의 용량을 합산한다.
+\begin{equation}
+  F_{\mathrm{flow}}^{\mathrm{uniform}}
+  =
+  \sum_{c\in\mathcal{C}_{\mathrm{span}}}
+  F_{\mathrm{flow}}^{(c)}.
+  \label{eq:uniform-capacity}
+\end{equation}
+
+\subsection{경로 강성과 변위 제한}
+
+경로 \(p\)에 직렬로 놓인 간선들의 등가 강성은
+\begin{equation}
+  k_p=
+  \left(
+    \sum_{e\in p}\frac{1}{k_e}
+  \right)^{-1}
+  \label{eq:path-stiffness}
+\end{equation}
+이다. 독립 병렬 경로의 등가 강성은
+\begin{equation}
+  k_{\mathrm{eq}}=\sum_p k_p
+\end{equation}
+다. 최대 허용 변위가 \(d_{\max}\)이면 변위 기반 용량은
+\begin{equation}
+  F_{\mathrm{disp}}=k_{\mathrm{eq}}d_{\max}
+\end{equation}
+다.
+
+빠른 평가 용량은
+\begin{equation}
+  \widehat{\Fcap}
+  =
+  \begin{cases}
+    \min(F_{\mathrm{flow}},F_{\mathrm{disp}}),
+      & \Ispan=1,\\
+    0, & \Ispan=0
+  \end{cases}
+  \label{eq:fast-capacity}
+\end{equation}
+로 정의한다.
+
+\subsection{증분 종단 시험}
+
+하중 간격을 \(\Delta F\)라 하고
+\begin{equation}
+  F^{(n)}=n\Delta F
+\end{equation}
+로 하중을 증가시킨다. 다음 실패 조건을 검사한다.
+
+\begin{align}
+  \mathcal{H}_{\mathrm{anchor}}
+    &: F^{(n)}\text{가 앵커 간선 용량을 초과},\\
+  \mathcal{H}_{\mathrm{contact}}
+    &: F^{(n)}\text{가 접촉 간선 용량을 초과},\\
+  \mathcal{H}_{\mathrm{slip}}
+    &: F^{(n)}\text{가 제방 접촉 용량을 초과},\\
+  \mathcal{H}_{\mathrm{disp}}
+    &: F^{(n)}/k_{\mathrm{eq}}>d_{\max},\\
+  \mathcal{H}_{\mathrm{disconnect}}
+    &: \Ispan=0.
+\end{align}
+
+첫 실패 직전의 지속 가능한 하중을
+\begin{equation}
+  \Fcap=
+  \max\left\{
+    F^{(n)}:
+    \neg\mathcal{H}_{\mathrm{anchor}}
+    \land
+    \neg\mathcal{H}_{\mathrm{contact}}
+    \land
+    \neg\mathcal{H}_{\mathrm{slip}}
+    \land
+    \neg\mathcal{H}_{\mathrm{disp}}
+    \land
+    \neg\mathcal{H}_{\mathrm{disconnect}}
+  \right\}
+  \label{eq:terminal-capacity}
+\end{equation}
+로 둔다.
+
+\section{기능 보상}
+
+\subsection{연결 진행 보상}
+
+\begin{equation}
+  r_{\mathrm{span}}^t=
+  \alpha\left(
+    \Pspan^{t+1}-\Pspan^t
+  \right).
+  \label{eq:span-reward}
+\end{equation}
+
+\subsection{기계 성능 보상}
+
+목표 대비 포화 품질을
+\begin{equation}
+  Q_t=
+  \min\left(
+    \frac{\widehat{\Fcap}^{\,t}}{\Ftarget},
+    1
+  \right)
+\end{equation}
+로 두면
+\begin{equation}
+  r_{\mathrm{mech}}^t=
+  \beta(Q_{t+1}-Q_t).
+  \label{eq:mechanical-reward}
+\end{equation}
+
+\subsection{효율과 실패}
+
+\begin{equation}
+  r_{\mathrm{eff}}^t=
+  -\lambda_t
+  -\lambda_E\Delta E^t
+  -\lambda_R\Delta N_{\mathrm{used}}^t
+  -\lambda_A\Delta N_{\mathrm{anchor}}^t
+  -\lambda_C\Delta N_{\mathrm{fallen}}^t.
+  \label{eq:efficiency-reward}
+\end{equation}
+
+종단 성공 보상은
+\begin{equation}
+  r_{\mathrm{success}}^t=
+  R_S
+  \I\!\left[
+    \Ispan^t=1
+    \land
+    \Fcap^t\ge\Ftarget
+  \right].
+  \label{eq:success-reward}
+\end{equation}
+
+전체 팀 보상은
+\begin{equation}
+  r_t=
+  r_{\mathrm{span}}^t+
+  r_{\mathrm{mech}}^t+
+  r_{\mathrm{eff}}^t+
+  r_{\mathrm{success}}^t.
+  \label{eq:team-reward}
+\end{equation}
+
+\section{모듈형 공유 행위자}
+
+\subsection{교통 가지}
+
+IR와 행동 이력을 시간축 입력으로 묶는다.
+\begin{equation}
+  X_{i,\mathrm{traffic}}^t
+  =
+  [D_i^t,A_i^t].
+\end{equation}
+두 개의 소형 1차원 시간 합성곱을 사용해
+\begin{equation}
+  z_{i,\mathrm{traffic}}^t
+  =
+  \operatorname{MeanPool}
+  \left(
+    \tanh\left(
+      W_{t,2}*
+      \tanh(W_{t,1}*X_{i,\mathrm{traffic}}^t+b_{t,1})
+      +b_{t,2}
+    \right)
+  \right)
+  \label{eq:traffic-encoder}
+\end{equation}
+을 만든다.
+
+\subsection{연결성 가지}
+
+\begin{equation}
+  X_{i,\mathrm{conn}}^t
+  =
+  [D_i^t,E_i^t,A_i^t,\bar v_i^t]
+\end{equation}
+를 시간 GRU에 입력한다.
+\begin{equation}
+  z_{i,\mathrm{conn}}^t
+  =
+  \operatorname{GRU}_{\mathrm{conn}}
+  (X_{i,\mathrm{conn}}^t).
+  \label{eq:connectivity-encoder}
+\end{equation}
+
+\subsection{기계 가지와 목표 가지}
+
+\begin{align}
+  z_{i,\mathrm{mech}}^t
+    &=
+    \operatorname{TCN}_{\mathrm{mech}}(E_i^t,A_i^t),\\
+  z_{\mathrm{goal}}
+    &=
+    \tanh\left(
+      W_g\frac{\Ftarget}{F_{\mathrm{norm}}}+b_g
+    \right).
+\end{align}
+
+\subsection{FiLM 조건화}
+
+\begin{align}
+  [\gamma_m,\beta_m]
+    &=W_m^{\mathrm{film}}z_{\mathrm{goal}}+b_m^{\mathrm{film}},\\
+  [\gamma_t,\beta_t]
+    &=W_t^{\mathrm{film}}z_{\mathrm{goal}}+b_t^{\mathrm{film}},\\
+  z'_{i,\mathrm{mech}}
+    &=\gamma_m\odot z_{i,\mathrm{mech}}+\beta_m,\\
+  z'_{i,\mathrm{traffic}}
+    &=\gamma_t\odot z_{i,\mathrm{traffic}}+\beta_t.
+  \label{eq:film}
+\end{align}
+
+\subsection{융합과 순환 상태}
+
+\begin{equation}
+  z_i^t=
+  \concat\left(
+    z'_{i,\mathrm{traffic}},
+    z_{i,\mathrm{conn}},
+    z'_{i,\mathrm{mech}},
+    z_{\mathrm{goal}},
+    s_{i,\mathrm{int}}^t,
+    z_i
+  \right).
+\end{equation}
+융합 특징은
+\begin{equation}
+  y_i^t=\tanh(W_fz_i^t+b_f)
+\end{equation}
+이고 순환 코어는 표준 GRU다.
+\begin{align}
+  r_i^t &=
+  \sigmoid(W_ry_i^t+U_rh_i^{t-1}+b_r),\\
+  u_i^t &=
+  \sigmoid(W_uy_i^t+U_uh_i^{t-1}+b_u),\\
+  \widetilde h_i^t &=
+  \tanh(W_hy_i^t+U_h(r_i^t\odot h_i^{t-1})+b_h),\\
+  h_i^t &=
+  (1-u_i^t)\odot h_i^{t-1}
+  +u_i^t\odot\widetilde h_i^t.
+  \label{eq:actor-gru}
+\end{align}
+
+행동 로짓과 확률은
+\begin{equation}
+  \ell_i^t=W_\pi h_i^t+b_\pi,
+  \qquad
+  \pi_\theta(a_i^t\mid o_i^t,h_i^{t-1},\Ftarget)
+  =
+  \softmax(\ell_i^t+M_i^t)
+  \label{eq:policy-head}
+\end{equation}
+다. \(M_{i,a}^t=0\)이면 가능한 행동이고,
+\(M_{i,a}^t=-\infty\)이면 물리적으로 불가능한 행동이다.
+
+\section{보조 표현 학습}
+
+시뮬레이터 훈련 표적을
+\begin{align}
+  y_{i,\mathrm{conn}}^t
+    &=\text{국소 로봇 접촉 이웃 수},\\
+  y_{i,\mathrm{traffic}}^t
+    &=\text{이동 중인 접촉 이웃 수},\\
+  y_{i,\mathrm{persist}}^t
+    &=\text{이전 스텝부터 유지된 접촉 수},\\
+  y_{i,\mathrm{force}}^t
+    &=\bar\varepsilon_i^t-\bar\varepsilon_i^{t-1}
+\end{align}
+로 둔다. 각 잠재 가지의 선형 헤드가 이를 예측한다.
+
+\begin{align}
+  \mathcal{L}_{\mathrm{conn}}
+    &=\MSE(\widehat y_{\mathrm{conn}},y_{\mathrm{conn}}),\\
+  \mathcal{L}_{\mathrm{traffic}}
+    &=\MSE(\widehat y_{\mathrm{traffic}},y_{\mathrm{traffic}}),\\
+  \mathcal{L}_{\mathrm{persist}}
+    &=\MSE(\widehat y_{\mathrm{persist}},y_{\mathrm{persist}}),\\
+  \mathcal{L}_{\mathrm{force}}
+    &=\MSE(\widehat y_{\mathrm{force}},y_{\mathrm{force}}).
+\end{align}
+
+전체 보조 손실은
+\begin{equation}
+  \mathcal{L}_{\mathrm{aux}}=
+  \lambda_{\mathrm{conn}}\mathcal{L}_{\mathrm{conn}}
+  +\lambda_{\mathrm{traffic}}\mathcal{L}_{\mathrm{traffic}}
+  +\lambda_{\mathrm{persist}}\mathcal{L}_{\mathrm{persist}}
+  +\lambda_{\mathrm{force}}\mathcal{L}_{\mathrm{force}}.
+  \label{eq:auxiliary-loss}
+\end{equation}
+이 표적은 추론 입력이 아니다.
+
+\section{중앙 비평가}
+
+\subsection{평탄화 비평가}
+
+중앙 상태는
+\begin{equation}
+  s_t=
+  \concat\left(
+    \{g_i^t\}_{i=1}^N,
+    w,\sin\psi,\cos\psi,
+    \frac{\Ftarget}{F_{\mathrm{norm}}},
+    \Pspan^t,
+    \frac{\widehat{\Fcap}^{\,t}}{F_{\mathrm{norm}}},
+    \Ispan^t
+  \right)
+\end{equation}
+다. \(g_i^t\)는 위치, 방향, 변형률, 앵커, 속도, 레이어와 낙하를 포함한다. MLP 비평가는
+\begin{equation}
+  V_\varphi(s_t)=
+  W_{v,3}\tanh\left(
+    W_{v,2}\tanh(W_{v,1}s_t+b_{v,1})+b_{v,2}
+  \right)+b_{v,3}
+  \label{eq:mlp-critic}
+\end{equation}
+로 값을 예측한다.
+
+\subsection{그래프 비평가}
+
+로봇 노드 특징을 \(x_i^{(0)}\), 간선 특징을 \(\xi_{ij}\)라 하자. 메시지 전달층은
+\begin{align}
+  m_i^{(\ell)}
+    &=
+    \frac{1}{\max(1,|\mathcal{N}(i)|)}
+    \sum_{j\in\mathcal{N}(i)}
+    \left[
+      W_n^{(\ell)}x_j^{(\ell)}
+      \odot
+      \sigmoid(W_e^{(\ell)}\xi_{ij}+b_e^{(\ell)})
+    \right],\\
+  x_i^{(\ell+1)}
+    &=
+    \tanh\left(
+      W_s^{(\ell)}x_i^{(\ell)}
+      +m_i^{(\ell)}
+      +b_s^{(\ell)}
+    \right).
+  \label{eq:message-passing}
+\end{align}
+
+그래프 풀링과 가치 출력은
+\begin{align}
+  \bar x&=\frac{1}{N}\sum_{i=1}^Nx_i^{(L)},\\
+  V_\varphi(\Gcontact^t)
+    &=W_{g,2}\tanh(W_{g,1}\bar x+b_{g,1})+b_{g,2}.
+  \label{eq:graph-value}
+\end{align}
+
+두 비평가 모두 훈련 전용이며 행위자의 분산 실행 입력을 바꾸지 않는다.
+
+\section{순환형 MAPPO}
+
+\subsection{반환값과 GAE}
+
+팀 가치 예측을 \(V_t=V_\varphi(s_t)\), 종단 마스크를
+\begin{equation}
+  m_t=1-d_t
+\end{equation}
+로 둔다. 시간차 오차는
+\begin{equation}
+  \delta_t=
+  r_t+\gamma m_tV_{t+1}-V_t
+\end{equation}
+이고 일반화 이점 추정치는
+\begin{equation}
+  \widehat A_t=
+  \delta_t+
+  \gamma\lambda m_t\widehat A_{t+1}.
+  \label{eq:gae}
+\end{equation}
+반환값 표적은
+\begin{equation}
+  \widehat R_t=\widehat A_t+V_t
+\end{equation}
+다.
+
+\subsection{PPO 확률비와 클립 목적}
+
+로봇 \(i\)의 확률비는
+\begin{equation}
+  \rho_{t,i}(\theta)=
+  \frac{
+    \pi_\theta(a_i^t\mid o_i^t,h_i^{t-1},\Ftarget)
+  }{
+    \pi_{\theta_{\mathrm{old}}}
+    (a_i^t\mid o_i^t,h_i^{t-1},\Ftarget)
+  }
+  \label{eq:probability-ratio}
+\end{equation}
+다. 공유 행위자의 클립 목적은
+\begin{equation}
+  \mathcal{J}_{\mathrm{clip}}(\theta)=
+  \mathbb{E}_{t,i}\left[
+    \min\left(
+      \rho_{t,i}\widehat A_t,\,
+      \clip(\rho_{t,i},1-\epsilon,1+\epsilon)\widehat A_t
+    \right)
+  \right].
+  \label{eq:ppo-clip}
+\end{equation}
+
+\subsection{최종 손실}
+
+정책 엔트로피를
+\begin{equation}
+  \mathcal{H}(\pi_\theta)=
+  -\mathbb{E}_{t,i}
+  \sum_a\pi_\theta(a\mid o_i^t)
+  \log\pi_\theta(a\mid o_i^t)
+\end{equation}
+라 하면 행위자 손실은
+\begin{equation}
+  \mathcal{L}_{\mathrm{actor}}=
+  -\mathcal{J}_{\mathrm{clip}}
+  -c_H\mathcal{H}(\pi_\theta)
+  +c_{\mathrm{aux}}\mathcal{L}_{\mathrm{aux}}.
+  \label{eq:actor-loss}
+\end{equation}
+
+비평가 손실은
+\begin{equation}
+  \mathcal{L}_{\mathrm{critic}}=
+  \mathbb{E}_t
+  \left[
+    \left(
+      V_\varphi(s_t)-\widehat R_t
+    \right)^2
+  \right].
+  \label{eq:critic-loss}
+\end{equation}
+
+순환 학습에서는 로봇별 시퀀스의 시간 순서를 유지한다. 에피소드 시작 지표 \(e_t\)에 대해
+\begin{equation}
+  h_i^{t-1}\leftarrow(1-e_t)h_i^{t-1}
+\end{equation}
+로 경계에서 은닉 상태를 초기화한다.
+
+\section{커리큘럼과 도메인 무작위화}
+
+커리큘럼 단계 \(c\in\{1,2,3,4\}\)에 따라 환경 파라미터 분포
+\begin{equation}
+  \zeta\sim p_c(\zeta)
+\end{equation}
+를 사용한다. \(\zeta\)에는
+\begin{equation}
+  \zeta=
+  (w,\psi,A,\bm p_i^0,\theta_i^0,
+   \mu,m,F_T,F_C,F_S,\sigma_s,\sigma_a)
+\end{equation}
+가 포함된다.
+
+최근 \(W\)개 에피소드 성공률을
+\begin{equation}
+  \bar S_W=
+  \frac{1}{W}
+  \sum_{k=1}^{W}S_k
+\end{equation}
+라 하면 단계 전이는
+\begin{equation}
+  c\leftarrow
+  \min(c+1,4)
+  \quad\text{if}\quad
+  \bar S_W\ge\tau_c
+  \label{eq:curriculum-transition}
+\end{equation}
+다.
+
+\section{모델 불변조건}
+
+구현과 실험은 다음 불변조건을 유지해야 한다.
+
+\begin{enumerate}[label=\arabic*.]
+  \item 행위자 관측 \(o_i^t\)에는 전역 위치, 전체 지도, 전체 접촉 그래프와 현재 \(\Fcap\)이 없다.
+  \item 모든 로봇은 동일한 \(\theta\)를 공유한다.
+  \item 보상은 특정 형상 또는 토폴로지를 직접 평가하지 않는다.
+  \item 성공은 \(\Ispan=1\)과 \(\Fcap\ge\Ftarget\)을 동시에 요구한다.
+  \item 보조 표적은 훈련에만 쓰고 추론 입력으로 사용하지 않는다.
+  \item 중앙 비평가의 특권 정보는 행위자 경로로 역으로 연결되지 않는다.
+  \item 종단 용량은 로봇 행동을 동결한 별도 하중 시험으로 검증한다.
+\end{enumerate}
+
+\section{정식화의 범위}
+
+본 모델은 창발적 집단 형태 형성과 정책 비교를 위한 연구 근사다. 식
+\eqref{eq:normal-force}의 접촉, 식 \eqref{eq:anchor-failure}의 앵커,
+식 \eqref{eq:fast-capacity} 및 \eqref{eq:terminal-capacity}의 구조 용량은
+연속체 역학 또는 안전 인증 모델이 아니다. 향후 더 높은 충실도의 물리 모델로
+대체할 때에도 식 \eqref{eq:decentralized-policy}, \eqref{eq:local-observation},
+\eqref{eq:success}의 분산 실행 및 기능 성공 조건은 유지되어야 한다.
+
+\end{document}

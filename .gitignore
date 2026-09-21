@@ -6,3 +6,10 @@ runs/
 *.pt
 *.gif
 bridge.png
+
+#LaTex
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
