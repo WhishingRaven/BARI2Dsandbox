@@ -1,0 +1,19 @@
+environment:
+  seed: 7
+  curriculum_stage: 1
+  max_steps: 400
+  latent_sigma: 0.0
+model:
+  architecture: gru
+  branch_hidden: 32
+  fused_hidden: 64
+  recurrent_hidden: 64
+  film: false
+  use_heterogeneity: false
+training:
+  total_updates: 1000
+  rollout_steps: 400
+  learning_rate: 0.0003
+  critic: mlp
+  output_dir: runs/baseline
+

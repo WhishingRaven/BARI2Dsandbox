@@ -1,0 +1,16 @@
+environment:
+  curriculum_stage: 1
+  gap:
+    width_min: 3.0
+    width_max: 5.0
+    orientation_jitter_deg: 18.0
+    irregularity: 0.35
+  sensor:
+    sensor_noise: 0.015
+  actuator_noise: 0.015
+training:
+  curriculum_enabled: true
+  curriculum_window: 25
+  curriculum_success_threshold: 0.7
+  curriculum_max_stage: 4
+

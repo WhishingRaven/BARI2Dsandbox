@@ -1,0 +1,20 @@
+environment:
+  seed: 7
+  curriculum_stage: 1
+  max_steps: 400
+  latent_sigma: 0.05
+model:
+  architecture: bio_film
+  branch_hidden: 48
+  fused_hidden: 64
+  recurrent_hidden: 64
+  film: true
+  use_heterogeneity: false
+training:
+  total_updates: 1000
+  rollout_steps: 400
+  learning_rate: 0.0003
+  auxiliary_coef: 0.1
+  critic: graph
+  output_dir: runs/bio_film
+
