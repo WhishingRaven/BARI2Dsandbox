@@ -4,15 +4,21 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib import animation, patches, transforms
+from matplotlib import animation, colors, patches, transforms
 
 from bari2d.env.bridge_env import BridgeEnv
 
 
 def robot_layer_color(layer: int, max_layer: int) -> tuple[float, float, float, float]:
-    """Map each discrete height layer to a stable, high-contrast color."""
+    """Map layers from red through violet in visible-spectrum order."""
     normalized = np.clip(layer / max(max_layer, 1), 0.0, 1.0)
-    return tuple(plt.colormaps["plasma"](normalized))
+    red, green, blue = colors.hsv_to_rgb((normalized * 0.75, 1.0, 1.0))
+    return float(red), float(green), float(blue), 1.0
+
+
+def robot_layer_zorder(layer: int, detail: int = 0) -> float:
+    """Reserve a drawing band so every higher layer covers lower details."""
+    return 10.0 + max(layer, 0) * 10.0 + detail
 
 
 def draw_environment(env: BridgeEnv, axis: plt.Axes | None = None) -> plt.Axes:
@@ -50,7 +56,8 @@ def draw_environment(env: BridgeEnv, axis: plt.Axes | None = None) -> plt.Axes:
             first, second = env.robots[first_node].position, env.robots[second_node].position
             axis.plot([first[0], second[0]], [first[1], second[1]], color="#ffd92f", linewidth=4.0, alpha=0.8)
 
-    for robot in env.robots:
+    for robot in sorted(env.robots, key=lambda item: (item.layer, item.robot_id)):
+        layer_zorder = robot_layer_zorder(robot.layer)
         color = robot_layer_color(robot.layer, env.config.robot.max_layer)
         if robot.fallen:
             color = "#444444"
@@ -61,7 +68,8 @@ def draw_environment(env: BridgeEnv, axis: plt.Axes | None = None) -> plt.Axes:
             facecolor=color,
             edgecolor="#d7191c" if robot.anchored else "black",
             linewidth=2.2 if robot.anchored else 0.8,
-            alpha=0.5 if robot.layer > 0 else 0.9,
+            alpha=1.0,
+            zorder=layer_zorder + 2,
         )
         transform = transforms.Affine2D().rotate(robot.theta).translate(*robot.position) + axis.transData
         rectangle.set_transform(transform)
@@ -72,11 +80,18 @@ def draw_environment(env: BridgeEnv, axis: plt.Axes | None = None) -> plt.Axes:
             [robot.position[1], robot.position[1] + heading[1]],
             color="black",
             linewidth=0.8,
+            zorder=layer_zorder + 3,
         )
         for angle_deg in env.config.sensor.ir_angles_deg:
             angle = robot.theta + np.deg2rad(angle_deg)
             end = robot.position + np.array([np.cos(angle), np.sin(angle)]) * env.config.sensor.ir_range
-            axis.plot([robot.position[0], end[0]], [robot.position[1], end[1]], color="#2c7bb6", alpha=0.12)
+            axis.plot(
+                [robot.position[0], end[0]],
+                [robot.position[1], end[1]],
+                color="#2c7bb6",
+                alpha=0.12,
+                zorder=layer_zorder + 1,
+            )
         if env.config.sensor.downward_ir_enabled:
             axis.scatter(
                 [robot.position[0]],
@@ -84,7 +99,7 @@ def draw_environment(env: BridgeEnv, axis: plt.Axes | None = None) -> plt.Axes:
                 marker="v",
                 color="#7b3294",
                 s=16,
-                zorder=9,
+                zorder=layer_zorder + 3,
                 linewidths=0.0,
             )
 
@@ -96,7 +111,7 @@ def draw_environment(env: BridgeEnv, axis: plt.Axes | None = None) -> plt.Axes:
     axis.text(
         0.01,
         0.01,
-        f"본체색: layer 0 (어두움) → {env.config.robot.max_layer} (밝음); 보라색: 하향 IR",
+        f"본체색: layer 0 (빨강) → {env.config.robot.max_layer} (보라); 보라색 삼각형: 하향 IR",
         transform=axis.transAxes,
         fontsize=8,
         va="bottom",

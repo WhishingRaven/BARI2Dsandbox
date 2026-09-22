@@ -20,7 +20,7 @@ from matplotlib.widgets import Button
 from bari2d.env.bridge_env import BridgeEnv
 from bari2d.env.robot import DiscreteAction
 from bari2d.utils.config import EnvironmentConfig, load_config
-from bari2d.utils.visualization import draw_environment
+from bari2d.utils.visualization import draw_environment, robot_layer_zorder
 
 
 ACTION_LABELS = {
@@ -297,7 +297,7 @@ class ManualViewer:
                 va="center",
                 fontsize=7,
                 color="white" if robot.fallen else "black",
-                zorder=11,
+                zorder=robot_layer_zorder(robot.layer, 4),
             )
         self.world_axis.set_title(
             f"수동 조종 · 선택 로봇 {selected.robot_id} · step {env.step_count}/{env.config.max_steps}"

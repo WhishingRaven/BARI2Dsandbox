@@ -197,7 +197,7 @@ L_V=\operatorname{MSE}(V_\phi(s_t),R_t)
 | sequence_minibatch_agents | 5 | 시간 전체를 유지하는 agent 묶음 |
 | learning_rate | 0.0003 | actor·critic 공통 |
 | checkpoint_interval | 50 | update 기준 |
-| max_steps | 400 | 에피소드 시간 제한 |
+| max_steps | 1000 | 에피소드 시간 제한 |
 | robot.count | 20 | 공유 actor를 쓰는 로봇 수 |
 | robot.max_layer | 10 | 이산 높이 최대값 |
 
