@@ -9,6 +9,7 @@ BARI2D는 약 20대의 동일한 크롤링 로봇이 국소 센서와 공유 정
 - [training.md](training.md): 분산 행위자, 중앙 비평가, MAPPO와 커리큘럼
 - [experiments.md](experiments.md): 검증, 절제 실험, 지표와 재현 절차
 - [inference.md](inference.md): 체크포인트 선택과 그래픽 정책 추론
+- [manual_control.md](manual_control.md): 키보드·마우스로 한 로봇씩 수동 조종
 - [robot_interface.md](robot_interface.md): 로봇 사양, RobotState, actor 관측, 행동 마스크와 중앙 critic 상태
 - [LaTex/bari2d_mathematical_formulation.tex](LaTex/bari2d_mathematical_formulation.tex): 상태, 관측, 동역학, 그래프 구조, 하중 용량, 보상과 MAPPO 목적의 수학적 정식화
 

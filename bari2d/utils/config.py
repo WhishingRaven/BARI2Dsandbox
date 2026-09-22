@@ -18,13 +18,14 @@ class RobotConfig:
     turn_rate: float = 1.2
     anchor_range: float = 1.05
     climb_height: float = 0.35
-    max_layer: int = 2
+    max_layer: int = 10
 
 
 @dataclass
 class SensorConfig:
     ir_range: float = 3.0
-    ir_angles_deg: list[float] = field(default_factory=lambda: [0.0])
+    ir_angles_deg: list[float] = field(default_factory=lambda: [0.0, 180.0, 90.0, -90.0])
+    downward_ir_enabled: bool = True
     ir_step: float = 0.025
     history: int = 4
     sensor_noise: float = 0.0
@@ -173,4 +174,14 @@ def config_from_dict(values: dict[str, Any]) -> ExperimentConfig:
     """Build an experiment configuration embedded in a checkpoint."""
     if not isinstance(values, dict):
         raise TypeError("Checkpoint configuration must be a mapping")
-    return _update_dataclass(ExperimentConfig(), values)
+    # Checkpoints created before the downward sensor was introduced must retain
+    # their original observation layout so their actor input layer still fits.
+    restored = dict(values)
+    environment = restored.get("environment")
+    if isinstance(environment, dict) and isinstance(environment.get("sensor"), dict):
+        restored_environment = dict(environment)
+        restored_sensor = dict(restored_environment["sensor"])
+        restored_sensor.setdefault("downward_ir_enabled", False)
+        restored_environment["sensor"] = restored_sensor
+        restored["environment"] = restored_environment
+    return _update_dataclass(ExperimentConfig(), restored)

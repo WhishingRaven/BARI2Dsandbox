@@ -9,6 +9,12 @@ from matplotlib import animation, patches, transforms
 from bari2d.env.bridge_env import BridgeEnv
 
 
+def robot_layer_color(layer: int, max_layer: int) -> tuple[float, float, float, float]:
+    """Map each discrete height layer to a stable, high-contrast color."""
+    normalized = np.clip(layer / max(max_layer, 1), 0.0, 1.0)
+    return tuple(plt.colormaps["plasma"](normalized))
+
+
 def draw_environment(env: BridgeEnv, axis: plt.Axes | None = None) -> plt.Axes:
     axis = axis or plt.subplots(figsize=(11, 6))[1]
     axis.clear()
@@ -29,7 +35,6 @@ def draw_environment(env: BridgeEnv, axis: plt.Axes | None = None) -> plt.Axes:
     background[gap_mask] = (0.494, 0.714, 0.812, 0.35)
     axis.imshow(background, origin="lower", extent=(0.0, field.length, 0.0, field.width), aspect="auto")
 
-    maximum_strain = max((robot.strain for robot in env.robots), default=1.0) or 1.0
     for edge in env.graph.edges.values():
         if not isinstance(edge.source, int) or not isinstance(edge.target, int):
             continue
@@ -46,8 +51,7 @@ def draw_environment(env: BridgeEnv, axis: plt.Axes | None = None) -> plt.Axes:
             axis.plot([first[0], second[0]], [first[1], second[1]], color="#ffd92f", linewidth=4.0, alpha=0.8)
 
     for robot in env.robots:
-        strain_level = min(robot.strain / maximum_strain, 1.0)
-        color = plt.cm.viridis(strain_level)
+        color = robot_layer_color(robot.layer, env.config.robot.max_layer)
         if robot.fallen:
             color = "#444444"
         rectangle = patches.Rectangle(
@@ -73,11 +77,30 @@ def draw_environment(env: BridgeEnv, axis: plt.Axes | None = None) -> plt.Axes:
             angle = robot.theta + np.deg2rad(angle_deg)
             end = robot.position + np.array([np.cos(angle), np.sin(angle)]) * env.config.sensor.ir_range
             axis.plot([robot.position[0], end[0]], [robot.position[1], end[1]], color="#2c7bb6", alpha=0.12)
+        if env.config.sensor.downward_ir_enabled:
+            axis.scatter(
+                [robot.position[0]],
+                [robot.position[1]],
+                marker="v",
+                color="#7b3294",
+                s=16,
+                zorder=9,
+                linewidths=0.0,
+            )
 
     axis.set(xlim=(0.0, field.length), ylim=(0.0, field.width), aspect="equal")
     axis.set_title(
         f"step={env.step_count} target={env.target_load:.2f} capacity={env.current_capacity:.2f} "
         f"progress={env.current_progress:.2f} span={env.graph.spans}"
+    )
+    axis.text(
+        0.01,
+        0.01,
+        f"본체색: layer 0 (어두움) → {env.config.robot.max_layer} (밝음); 보라색: 하향 IR",
+        transform=axis.transAxes,
+        fontsize=8,
+        va="bottom",
+        bbox={"facecolor": "white", "alpha": 0.7, "edgecolor": "none"},
     )
     axis.set_xlabel("x")
     axis.set_ylabel("y")

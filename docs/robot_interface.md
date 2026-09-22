@@ -9,7 +9,7 @@
 | 이름 | 누가 사용하나 | 범위 | 기본 크기 |
 | --- | --- | --- | ---: |
 | RobotState | 시뮬레이터 | 한 로봇의 완전한 내부 상태 | 구조체 |
-| local observation | 공유 actor 정책 | 한 로봇이 행동을 고르는 데 쓸 수 있는 국소 정보 | 23 |
+| local observation | 공유 actor 정책 | 한 로봇이 행동을 고르는 데 쓸 수 있는 국소 정보 | 39 |
 | global state | 중앙 critic과 분석 코드 | 모든 로봇과 교량의 전역 요약 | 187 |
 
 분산 실행 원칙상 actor에는 local observation과 자신의 순환 은닉 상태만 주어진다. 전역 위치, 모든 접촉 연결, 다른 로봇의 상태와 현재 구조 용량은 actor 입력에 포함되지 않는다.
@@ -28,7 +28,7 @@
 | 제어 간격 | environment.time_step | 0.10 | 한 환경 step의 시간 간격 |
 | 앵커 반경 | robot.anchor_range | 1.05 | 다른 로봇 중심까지 앵커를 만들 수 있는 최대 거리 |
 | 등반 높이 | robot.climb_height | 0.35 | CLIMB 에너지에 쓰이는 층간 높이 |
-| 최대 층 | robot.max_layer | 2 | 바닥 0층 위에 허용되는 최고 층 번호 |
+| 최대 층 | robot.max_layer | 10 | 바닥 0층 위에 허용되는 최고 층 번호 |
 
 로봇 본체는 중심 위치, 방위 \(\theta\), 길이와 폭으로 정해지는 oriented bounding box다. 접촉은 이 상자의 중첩으로 판정한다. 환경은 2차원 위치를 적분하되 layer라는 이산 높이 상태를 함께 둔 2.5D 모델이다.
 
@@ -61,7 +61,7 @@ RobotState는 bari2d/env/robot.py에 정의된다. 아래 항목은 정책 관�
 | anchored | bool | ANCHOR와 RELEASE, 앵커 파손으로 갱신 | 예 |
 | strain | 0 이상 | 접촉 및 앵커 edge의 힘을 합산해 매 step 재계산 | 이력의 정규화 값만 |
 | previous_action | 0–9 | 유효 action 또는 IDLE | 정규화 이력만 |
-| layer | 0–2 | 성공한 등반 때 지지 로봇 층 + 1 | 정규화 값만 |
+| layer | 0–10 | 성공한 등반 때 지지 로봇 층 + 1, 지지 범위를 벗어나면 자동 하강 | 정규화 값만 |
 | fallen | bool | 지지 없이 간극에 있으면 true | 예 |
 | energy | 0 이상 | 이동·등반 비용을 누적 | 아니오 |
 | anchor_partner | 로봇 ID, LEFT_BANK, RIGHT_BANK 또는 null | 앵커 연결/해제/파손 | 아니오 |
@@ -80,29 +80,29 @@ reset과 step은 float32 배열 \(O\in\mathbb{R}^{N\times D}\)를 반환하며, 
 D=H R+H+H+6+1+Z=H(R+2)+7+Z.
 \]
 
-기준 설정에서는 history \(H=4\), IR ray 수 \(R=1\), latent 차원 \(Z=4\)이므로 \(D=23\)이다. 이력은 오래된 값부터 최신 값 순서이고, 각 step 후 새 측정값이 마지막 칸에 들어간다.
+기준 설정에서는 history \(H=4\), IR ray 수 \(R=5\), latent 차원 \(Z=4\)이므로 \(D=39\)이다. 이력은 오래된 값부터 최신 값 순서이고, 각 step 후 새 측정값이 마지막 칸에 들어간다.
 
 | Python slice | 기본 인덱스 | 길이 | 값과 정규화 |
 | --- | --- | ---: | --- |
-| ir | [0:4) | 4 | 최근 4개 IR 거리. 각 거리를 ir_range 3.0으로 나누어 [0, 1] |
-| strain | [4:8) | 4 | 최근 4개 변형률. 아래 strain scale로 나누고 [0, 2] clip |
-| action_history | [8:12) | 4 | 최근 action ID를 9로 나눈 값, 즉 [0, 1] |
-| internal | [12:18) | 6 | 앵커·등반·속도·조향·층·낙하 상태 |
-| goal | [18:19) | 1 | target_load / load.max_target |
-| latent | [19:23) | 4 | 에피소드 내 고정 개인 latent |
+| ir | [0:20) | 20 | 최근 4개 관측 × 전방·후방·좌·우·하향 IR 5개. 각 거리를 ir_range 3.0으로 나누어 [0, 1] |
+| strain | [20:24) | 4 | 최근 4개 변형률. 아래 strain scale로 나누고 [0, 2] clip |
+| action_history | [24:28) | 4 | 최근 action ID를 9로 나눈 값, 즉 [0, 1] |
+| internal | [28:34) | 6 | 앵커·등반·속도·조향·층·낙하 상태 |
+| goal | [34:35) | 1 | target_load / load.max_target |
+| latent | [35:39) | 4 | 에피소드 내 고정 개인 latent |
 
 여기서 [a:b)는 b를 포함하지 않는 Python slice 표기다. 설정에서 ray 수, history 또는 latent_dim을 바꾸면 모든 slice와 observation 크기가 함께 바뀐다.
 
 ### IR 관측
 
-각 ray는 로봇 방위에 ir_angles_deg를 더한 방향으로 0.025 간격으로 ray march한다. 다음 중 먼저 만나는 대상까지의 거리를 3.0으로 나눈다.
+수평 ray는 로봇 방위에 ir_angles_deg를 더한 방향으로 0.025 간격으로 ray march한다. 다음 중 먼저 만나는 대상까지의 거리를 3.0으로 나눈다.
 
 - 필드 밖 경계
 - 현재 제방에서 간극 또는 반대 제방으로 넘어가는 경계
 - 원형 장애물
 - layer 차이가 1 이하인, 낙하하지 않은 다른 로봇의 본체
 
-기준 설정의 ray 각도는 [0°] 하나이므로 전방 거리만 측정한다. reset 직후 이력은 1.0으로 채운 후 최신 slot에 실제 첫 측정값을 기록한다.
+기준 수평 ray의 순서는 전방 [0°], 후방 [180°], 좌측 [90°], 우측 [-90°]다. 다섯 번째 하향 IR은 로봇 중심 아래의 제방 또는 반경 1.125 안에 있는 더 낮은 layer 로봇까지의 수직 거리를 반환한다. 아래에 표면이 없으면 최대 거리 1.0을 반환하며, 이는 절벽 또는 지지 상실 신호다. reset 직후 이력은 1.0으로 채운 후 최신 slot에 실제 첫 측정값을 기록한다.
 
 ### Strain과 행동 이력
 
@@ -146,7 +146,7 @@ action은 로봇당 하나의 정수이며 shape은 (N,)이다. action_count는 
 | 8 | RELEASE | 구조 action | 자신의 앵커 해제 |
 | 9 | IDLE | \(u_v=0,u_s=0\) | 별도 운동학 갱신 없음 |
 
-CLIMB는 앞쪽에 있고, 거리가 \(0.9\times1.25=1.125\) 이하이며, 아직 최고 층이 아닌 로봇이 있을 때만 유효하다. 성공하면 지지 로봇의 layer+1로 올라가며 현재 방위로 0.27만큼 이동한다. 에너지는 무작위화된 질량과 climb_height의 곱만큼 증가한다.
+CLIMB는 앞쪽에 있고, 거리가 \(0.9\times1.25=1.125\) 이하이며, 아직 최고 층이 아닌 로봇이 있을 때만 유효하다. 성공하면 지지 로봇의 layer+1로 올라가며 현재 방위로 0.27만큼 이동한다. 에너지는 무작위화된 질량과 climb_height의 곱만큼 증가한다. 앵커되지 않은 로봇은 바로 아래 layer의 로봇이 반경 1.125 안에 없으면 action 뒤 자동으로 한 layer씩 내려온다. 이 하강은 별도 action이 아니다.
 
 ANCHOR는 이미 anchored가 아니고 후보가 있을 때만 유효하다. 후보 선택은 제방 본체 접촉을 우선하고, 없으면 중심 거리가 1.05 이하이며 layer 차이가 1 이하인 낙하하지 않은 로봇 중 가장 가까운 것을 고른다. 한 로봇은 하나의 소유 앵커만 가질 수 있다.
 
@@ -195,7 +195,7 @@ global_state()는 기본적으로 187차원이다.
 4. 접촉을 해소하고, 접촉·앵커 그래프와 strain을 다시 계산하며, 지지 없는 로봇을 낙하시킨다.
 5. 하중 용량과 진행도를 평가하고, IR·strain·action history를 갱신하여 다음 local observation을 반환한다.
 
-공유 actor의 기본 GRU hidden 차원은 64이며, 로봇마다 별도로 이어진다. 이 hidden은 물리적 RobotState나 local observation 23차원에 포함되지 않고 rollout 또는 inference 세션이 보관한다. 에피소드 reset 시 hidden도 0으로 초기화해야 한다.
+공유 actor의 기본 GRU hidden 차원은 64이며, 로봇마다 별도로 이어진다. 이 hidden은 물리적 RobotState나 local observation 39차원에 포함되지 않고 rollout 또는 inference 세션이 보관한다. 에피소드 reset 시 hidden도 0으로 초기화해야 한다.
 
 ## 설정 및 확인
 
@@ -205,7 +205,7 @@ global_state()는 기본적으로 187차원이다.
     from bari2d.env.bridge_env import BridgeEnv
     env = BridgeEnv()
     observation, _ = env.reset()
-    print(observation.shape)       # (20, 23)
+    print(observation.shape)       # (20, 39)
     print(env.action_masks().shape)  # (20, 10)
     print(env.global_state().shape)  # (187,)
     "

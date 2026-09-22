@@ -55,6 +55,12 @@ conda run -n bari2d python scripts/visualize_episode.py \
   --rows 2 --output bridge.png
 ```
 
+Manually select and control one robot per step:
+
+```bash
+conda run -n bari2d python scripts/manual.py
+```
+
 ## Simulator
 
 `BridgeEnv` exposes a Gym-style `reset`/`step` interface without requiring Gymnasium. Each robot is an oriented rectangle with position, heading, scalar forward velocity, steering, head-lift state, anchor state, local strain, previous action, layer, and optional persistent latent. Planar motion uses bounded kinematics. Same-layer overlap produces a normal positional response, frictional velocity damping, and a strain-producing contact force. A climb command can move a robot onto a nearby supporting robot's discrete height layer. Robots unsupported over the gap fall out of the active mechanical structure.
@@ -67,14 +73,14 @@ Anchors are persistent robot-robot or robot-bank edges. Configurable tension, co
 
 Every continuous value is normalized. One actor observation contains:
 
-- IR history from one or more configurable planar rays;
+- IR history from configurable front, back, left, right, and downward rays;
 - local strain history;
 - previous-action history;
 - anchor state, head-lift state, velocity, steering, height layer, and fallen state;
 - normalized target load;
 - optional episode-persistent Gaussian latent.
 
-The IR implementation ray-marches against robot oriented boxes, circular obstacles, field limits, and bank/gap substrate transitions. In this 2.5D model, a downward-looking edge detector is represented by detecting the bank-to-gap transition along a configurable ray direction.
+The four planar IR rays ray-march against robot oriented boxes, circular obstacles, field limits, and bank/gap substrate transitions. The downward IR ray returns the vertical distance to a bank under the robot or to a lower-layer robot inside its support radius; maximum range means there is no supporting surface below (a cliff).
 
 The centralized state and graph are separate methods used only by critics and diagnostics. Tests and model construction preserve this actor/critic boundary.
 
@@ -153,7 +159,7 @@ Curriculum stage advances when a rolling success window reaches the configured t
 
 `runs/<name>/episodes.jsonl` stores success, gap parameters, target and measured capacity, capacity ratio, construction time, used and anchored robot counts, energy proxy, anchor failures, fallen count, maximum progress, final contact graph, final morphology, action distribution, and available branch-latent statistics. Checkpoints include actor, critic, optimizers, configuration, and update number.
 
-Visualization shows terrain, gap, robot rectangles and orientation, height layers, anchored edges, contact graph, IR rays, strain color, target load, capacity, progress, and any load-bearing path returned by the terminal evaluator. `record_episode` can save a GIF for any callable policy.
+Visualization shows terrain, gap, robot rectangles and orientation, layer color, anchored edges, contact graph, planar and downward IR markers, target load, capacity, progress, and any load-bearing path returned by the terminal evaluator. `record_episode` can save a GIF for any callable policy.
 
 ## Verification
 

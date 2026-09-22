@@ -7,7 +7,7 @@ import torch
 
 from bari2d.env.bridge_env import BridgeEnv
 from bari2d.models.actor import SharedRecurrentActor
-from bari2d.utils.config import ExperimentConfig
+from bari2d.utils.config import ExperimentConfig, config_from_dict
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -41,3 +41,15 @@ def test_inference_session_runs_policy_only_step(tmp_path: Path) -> None:
     session.step()
     assert session.env.step_count == 1
     assert session.last_prediction is not None
+
+
+def test_legacy_checkpoint_config_keeps_its_original_sensor_layout() -> None:
+    serialized = ExperimentConfig().to_dict()
+    serialized["environment"]["sensor"].pop("downward_ir_enabled")
+    serialized["environment"]["sensor"]["ir_angles_deg"] = [0.0]
+
+    restored = config_from_dict(serialized)
+    environment = BridgeEnv(restored.environment)
+
+    assert not restored.environment.sensor.downward_ir_enabled
+    assert environment.observation_size == 23

@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from bari2d.env.robot import DiscreteAction, RobotState
-from bari2d.env.sensors import ir_distances
+from bari2d.env.sensors import ir_distances, ir_ray_count
 
 
 def test_robot_moves_and_steers(env) -> None:
@@ -31,6 +31,29 @@ def test_ir_detects_robot_and_gap_edge(env) -> None:
     assert robot_reading < edge_reading
 
 
+def test_default_ir_has_cardinal_and_downward_rays(env) -> None:
+    readings = ir_distances(
+        env.robots[0], env.robots, env.field, env.config.robot, env.config.sensor, env.rng
+    )
+
+    assert env.config.sensor.ir_angles_deg == [0.0, 180.0, 90.0, -90.0]
+    assert ir_ray_count(env.config.sensor) == 5
+    assert env.observation_size == 39
+    assert readings.shape == (5,)
+    assert readings[-1] == 0.0
+
+
+def test_downward_ir_reports_a_cliff_when_no_surface_is_below(env) -> None:
+    robot = env.robots[0]
+    robot.position = env.field.center.copy()
+
+    readings = ir_distances(
+        robot, env.robots, env.field, env.config.robot, env.config.sensor, env.rng
+    )
+
+    assert readings[-1] == 1.0
+
+
 def test_contact_enables_climb(env) -> None:
     base = env.robots[0]
     support = env.robots[1]
@@ -43,3 +66,23 @@ def test_contact_enables_climb(env) -> None:
     assert base.head_lifted
     assert base.layer == support.layer + 1
 
+
+def test_elevated_robot_automatically_descends_after_leaving_support_range() -> None:
+    from bari2d.env.bridge_env import BridgeEnv
+    from bari2d.utils.config import EnvironmentConfig
+
+    config = EnvironmentConfig()
+    config.robot.count = 2
+    config.max_steps = 10
+    environment = BridgeEnv(config)
+    environment.reset(seed=3)
+    climber, support = environment.robots
+    climber.layer = 1
+    support.layer = 0
+    support.position = climber.position - climber.heading * (config.robot.length * 1.25 - 0.03)
+
+    actions = np.full(2, int(DiscreteAction.IDLE))
+    actions[0] = int(DiscreteAction.FORWARD)
+    environment.step(actions)
+
+    assert climber.layer == 0

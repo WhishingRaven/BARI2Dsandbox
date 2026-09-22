@@ -184,7 +184,7 @@
 \(b_i\in\{0,1\}\) & 앵커 상태\\
 \(\varepsilon_i\ge0\) & 국소 변형률/하중 추정\\
 \(a_i^{t-1}\) & 이전 행동\\
-\(k_i\in\{0,\ldots,K\}\) & 2.5D 높이 레이어\\
+\(k_i\in\{0,\ldots,K\},\;K=10\) & 2.5D 높이 레이어\\
 \(f_i\in\{0,1\}\) & 낙하 상태\\
 \bottomrule
 \end{tabular}
@@ -253,6 +253,24 @@
 \end{equation}
 다. 이는 연속 \(z\)축 강체 운동 대신 사용하는 2.5D 근사다.
 
+등반 뒤 지지체를 지나 전진한 로봇은 별도 하강 행동 없이 자동으로 내려온다.
+\(k_i^t>0\)인 로봇의 바로 아래 레이어 지지 집합을
+\begin{equation}
+  \mathcal{S}_{i,\downarrow}^t=
+  \left\{
+    j:
+    k_j^t=k_i^t-1,\;
+    \norm{\bm{p}_j^t-\bm{p}_i^t}\le r_c,\;
+    f_j^t=0
+  \right\}
+\end{equation}
+라 하자. 로봇이 앵커되지 않았고
+\(\mathcal{S}_{i,\downarrow}^t=\varnothing\)이면
+\begin{equation}
+  k_i^{t+1}=k_i^t-1
+\end{equation}
+로 갱신한다. 반복 적용으로 지지체가 전혀 없으면 바닥 레이어까지 내려온다.
+
 \section{국소 센서와 관측}
 
 \subsection{IR 광선}
@@ -282,6 +300,28 @@
   \right)
 \end{equation}
 이며 \(\eta_{i,r}^t\sim\mathcal{N}(0,\sigma_s^2)\)다.
+
+기본 수평 센서 집합은
+\begin{equation}
+  \mathcal{A}=
+  \left\{
+    0,\pi,\frac{\pi}{2},-\frac{\pi}{2}
+  \right\}
+\end{equation}
+로, 각각 전방, 후방, 좌측, 우측을 뜻한다. 여기에 하향 IR
+\(\bar d_{i,\downarrow}^t\)를 추가한다. 하향 센서는 로봇 중심 아래 제방 또는 반경
+\(r_c\) 안의 더 낮은 레이어 로봇까지의 수직 거리를 측정한다.
+\begin{equation}
+  d_{i,\downarrow}^t=
+  \begin{cases}
+    k_i^t h_c, & \text{중심 아래가 제방인 경우},\\
+    \min\limits_{j:\;k_j^t<k_i^t,\;
+      \norm{\bm{p}_j^t-\bm{p}_i^t}\le r_c}
+      (k_i^t-k_j^t)h_c, & \text{아래 로봇이 있는 경우},\\
+    D_{\max}, & \text{아래 표면이 없는 경우}.
+  \end{cases}
+\end{equation}
+따라서 \(\bar d_{i,\downarrow}^t=1\)은 절벽 또는 지지 상실의 국소 신호다.
 
 \subsection{변형률}
 

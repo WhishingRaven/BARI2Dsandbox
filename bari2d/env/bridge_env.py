@@ -10,7 +10,7 @@ from bari2d.env.contact_model import ContactGraph, ContactModel
 from bari2d.env.field import LEFT_BANK, RIGHT_BANK, GapField, GapGenerator
 from bari2d.env.load_evaluator import FastLoadEvaluator, IncrementalLoadEvaluator, LoadTestResult
 from bari2d.env.robot import ACTION_COUNT, DiscreteAction, RobotState
-from bari2d.env.sensors import ir_distances
+from bari2d.env.sensors import ir_distances, ir_ray_count
 from bari2d.utils.config import EnvironmentConfig
 
 
@@ -29,7 +29,7 @@ class ObservationLayout:
 
 def make_observation_layout(config: EnvironmentConfig) -> ObservationLayout:
     history = config.sensor.history
-    ray_count = len(config.sensor.ir_angles_deg)
+    ray_count = ir_ray_count(config.sensor)
     start = 0
     ir = slice(start, start + history * ray_count)
     start = ir.stop
@@ -73,7 +73,7 @@ class BridgeEnv:
         self.max_progress = 0.0
         self.last_load_test: LoadTestResult | None = None
         self._episode_success = False
-        self._ir_history = np.zeros((self.config.robot.count, self.config.sensor.history, len(self.config.sensor.ir_angles_deg)), dtype=np.float32)
+        self._ir_history = np.zeros((self.config.robot.count, self.config.sensor.history, self.layout.ray_count), dtype=np.float32)
         self._strain_history = np.zeros((self.config.robot.count, self.config.sensor.history), dtype=np.float32)
         self._action_history = np.full((self.config.robot.count, self.config.sensor.history), int(DiscreteAction.IDLE), dtype=np.int64)
         self._previous_contacts: set[frozenset[int | str]] = set()
@@ -220,6 +220,30 @@ class BridgeEnv:
                 candidates.append((distance, other))
         return min(candidates, key=lambda item: item[0])[1] if candidates else None
 
+    def _lower_layer_support(self, robot: RobotState) -> RobotState | None:
+        """Return the nearby robot directly supporting this elevated layer."""
+        candidates: list[tuple[float, RobotState]] = []
+        for other in self.robots:
+            if other.robot_id == robot.robot_id or other.fallen or other.layer != robot.layer - 1:
+                continue
+            distance = float(np.linalg.norm(other.position - robot.position))
+            if distance <= self.config.robot.length * 1.25:
+                candidates.append((distance, other))
+        return min(candidates, key=lambda item: item[0])[1] if candidates else None
+
+    def _auto_descend_unsupported(self) -> None:
+        """Lower moving elevated robots once no robot supports the layer below."""
+        for _ in range(self.config.robot.max_layer):
+            changed = False
+            for robot in self.robots:
+                if robot.fallen or robot.anchored or robot.layer == 0:
+                    continue
+                if self._lower_layer_support(robot) is None:
+                    robot.layer -= 1
+                    changed = True
+            if not changed:
+                return
+
     def step(self, actions: np.ndarray | list[int]) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         action_array = np.asarray(actions, dtype=np.int64).copy()
         if action_array.shape != (len(self.robots),):
@@ -266,6 +290,7 @@ class BridgeEnv:
                 robot.previous_action = int(action)
             self._constrain_to_field(robot)
 
+        self._auto_descend_unsupported()
         self.contact_model.resolve_contacts(self.robots)
         for robot in self.robots:
             self._constrain_to_field(robot)
