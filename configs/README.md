@@ -12,7 +12,6 @@
 | bio_film.yaml | bio_film | graph | bio와 목표 하중 FiLM의 차이 |
 | bio_heterogeneity.yaml | bio_heterogeneity | graph | bio_film과 개체별 latent의 차이 |
 | curriculum.yaml | gru | mlp | 난이도 무작위화가 켜진 기준선 |
-| bio_policy.yaml | bio_film | graph | 이전 이름과의 호환용 alias |
 
 예를 들어 bio_film을 학습한다.
 

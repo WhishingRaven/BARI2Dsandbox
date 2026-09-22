@@ -36,7 +36,7 @@ Train the full branch architecture with FiLM conditioning and the graph critic:
 
 ```bash
 conda run -n bari2d python scripts/train.py \
-  --config configs/bio_policy.yaml \
+  --config configs/bio_film.yaml \
   --updates 1000
 ```
 

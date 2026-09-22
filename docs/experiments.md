@@ -78,11 +78,10 @@
 전체 FiLM 정책과 그래프 비평가:
 
     conda run -n bari2d python scripts/train.py \
-      --config configs/bio_policy.yaml --updates 1000
+      --config configs/bio_film.yaml --updates 1000
 
 단계 4 평가:
 
     conda run -n bari2d python scripts/evaluate.py \
       runs/baseline/checkpoint_001000.pt \
       --config configs/baseline.yaml --stage 4 --episodes 100
-

@@ -18,7 +18,6 @@ CASES = (
     ("bio_film.yaml", "bio_film", "graph", False),
     ("bio_heterogeneity.yaml", "bio_heterogeneity", "graph", True),
     ("curriculum.yaml", "gru", "mlp", False),
-    ("bio_policy.yaml", "bio_film", "graph", False),
 )
 
 

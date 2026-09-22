@@ -20,9 +20,6 @@
 | bio_film.yaml | bio_film | 예 | 아니오 | graph | 위와 같음 | 목표 하중 조건화가 필요한가 |
 | bio_heterogeneity.yaml | bio_heterogeneity | 예 | 예 | graph | 위와 같음 | 영속적 개체 차이가 협업에 도움이 되는가 |
 | curriculum.yaml | gru | 아니오 | 아니오 | MLP | 없음 | 더 넓은 무작위화·잡음에서 견디는가 |
-| bio_policy.yaml | bio_film | 예 | 아니오 | graph | 위와 같음 | bio_film의 이전 파일명 호환 |
-
-bio_policy.yaml은 bio_film.yaml과 같은 학습 구성을 보존한 alias다. 새 실험에서는 bio_film.yaml을 사용한다.
 
 ## 각 설정이 학습에 만드는 차이
 

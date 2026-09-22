@@ -108,7 +108,7 @@ graph critic은 학습 전용 접촉 그래프를 사용한다.
 - edge feature 6개: edge kind, force/capacity, capacity, 상대 pose
 - 64-unit message passing layer 2개와 평균 pooling
 
-실행 중 공유 actor에는 어느 critic 입력도 전달하지 않는다. baseline.yaml은 MLP critic, bio_policy.yaml은 graph critic을 사용한다.
+실행 중 공유 actor에는 어느 critic 입력도 전달하지 않는다. baseline.yaml은 MLP critic, bio_film.yaml은 graph critic을 사용한다.
 
 ## 7. Rollout과 GAE
 

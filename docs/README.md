@@ -39,6 +39,6 @@ BARI2D는 약 20대의 동일한 크롤링 로봇이 국소 센서와 공유 정
 전체 생물 영감형 정책 훈련:
 
     conda run -n bari2d python scripts/train.py \
-      --config configs/bio_policy.yaml --updates 1000
+      --config configs/bio_film.yaml --updates 1000
 
 상세한 사용법과 현재 한계는 저장소 루트의 [README.md](../README.md)를 함께 참고한다.
