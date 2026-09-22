@@ -82,7 +82,7 @@ class RewardConfig:
 
 @dataclass
 class EnvironmentConfig:
-    max_steps: int = 400
+    max_steps: int = 1000
     time_step: float = 0.1
     curriculum_stage: int = 1
     seed: int = 0

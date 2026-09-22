@@ -2,7 +2,7 @@
 environment:
   seed: 7
   curriculum_stage: 1
-  max_steps: 400
+  max_steps: 1000
   latent_sigma: 0.0
 model:
   architecture: gru_traffic_connectivity
