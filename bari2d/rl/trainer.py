@@ -146,6 +146,13 @@ class Trainer:
             metrics["update"] = float(update)
             metrics["curriculum_stage"] = float(self.env.config.curriculum_stage)
             history.append(metrics)
+            print(
+                f"Update {update}/{update_count} "
+                f"actor_loss={metrics['actor_loss']:.4f} "
+                f"critic_loss={metrics['critic_loss']:.4f} "
+                f"entropy={metrics['entropy']:.4f}",
+                flush=True,
+            )
             if update % training.checkpoint_interval == 0 or update == update_count:
                 self.save_checkpoint(update)
         return history

@@ -4,7 +4,7 @@ from bari2d.rl.trainer import Trainer
 from bari2d.utils.config import ExperimentConfig
 
 
-def test_recurrent_mappo_completes_one_update(tmp_path) -> None:
+def test_recurrent_mappo_completes_one_update(tmp_path, capsys) -> None:
     config = ExperimentConfig()
     config.environment.robot.count = 4
     config.environment.max_steps = 4
@@ -18,6 +18,9 @@ def test_recurrent_mappo_completes_one_update(tmp_path) -> None:
     config.training.output_dir = str(tmp_path)
     trainer = Trainer(config)
     history = trainer.train(updates=1)
+    output = capsys.readouterr().out
     assert len(history) == 1
+    assert "Update 1/1" in output
+    assert "actor_loss=" in output
     assert (tmp_path / "checkpoint_000001.pt").exists()
     assert (tmp_path / "episodes.jsonl").exists()
