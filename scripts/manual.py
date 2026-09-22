@@ -10,7 +10,18 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import os
 from pathlib import Path
+import sys
+
+import matplotlib
+
+# The native macOS canvas can leave keyboard focus with the window chrome or a
+# toolbar.  The Tk canvas has an explicit focus API, which makes the manual
+# controller reliable when it is launched as a program.  Do not override an
+# explicitly requested backend: ``MPLBACKEND=Agg`` remains the headless path.
+if __name__ == "__main__" and sys.platform == "darwin" and not os.environ.get("MPLBACKEND"):
+    matplotlib.use("TkAgg")
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -49,6 +60,21 @@ KEY_ACTIONS = {
     " ": DiscreteAction.IDLE,
 }
 
+# Matplotlib reports the currently active input character.  Accepting the
+# corresponding two-beolsik jamo means the controller still works when the
+# operating-system input source is Korean instead of English.
+KOREAN_KEY_ALIASES = {
+    "ㅈ": "w",
+    "ㄴ": "s",
+    "ㅁ": "a",
+    "ㅇ": "d",
+    "ㅋ": "z",
+    "ㅊ": "c",
+    "ㄷ": "e",
+    "ㅂ": "q",
+    "ㄱ": "r",
+}
+
 BUTTON_ACTIONS = (
     DiscreteAction.FORWARD,
     DiscreteAction.BACKWARD,
@@ -79,6 +105,14 @@ def configure_manual_keymap() -> None:
     """Reserve S and Q for robot control instead of Matplotlib shortcuts."""
     for keymap in ("keymap.save", "keymap.quit", "keymap.quit_all", "keymap.home"):
         plt.rcParams[keymap] = []
+
+
+def normalize_control_key(key: str | None) -> str | None:
+    """Map case and Korean two-beolsik input to a controller key."""
+    if key is None:
+        return None
+    normalized = key.lower()
+    return KOREAN_KEY_ALIASES.get(normalized, normalized)
 
 
 @dataclass
@@ -162,6 +196,7 @@ class ManualViewer:
         self.figure.canvas.mpl_connect("key_press_event", self._on_key)
         self.figure.canvas.mpl_connect("button_press_event", self._on_click)
         self.redraw()
+        self._focus_keyboard()
 
     def _make_buttons(self) -> None:
         for index, action in enumerate(BUTTON_ACTIONS):
@@ -187,7 +222,7 @@ class ManualViewer:
         self.buttons.append(close)
 
     def _on_key(self, event) -> None:
-        key = event.key
+        key = normalize_control_key(event.key)
         if key in ("left", "["):
             self.session.select_offset(-1)
         elif key in ("right", "]"):
@@ -208,6 +243,7 @@ class ManualViewer:
     def _on_click(self, event) -> None:
         if event.inaxes is not self.world_axis or event.xdata is None or event.ydata is None:
             return
+        self._focus_keyboard()
         point = np.array([event.xdata, event.ydata])
         positions = np.array([robot.position for robot in self.session.env.robots])
         distances = np.linalg.norm(positions - point, axis=1)
@@ -219,19 +255,36 @@ class ManualViewer:
     def _execute(self, action: DiscreteAction) -> None:
         self.session.step(action)
         self.redraw()
+        self._focus_keyboard()
 
     def _reset(self) -> None:
         self.session.reset()
         self.status_message = "에피소드를 다시 시작했습니다."
         self.redraw()
+        self._focus_keyboard()
 
     def _save(self) -> None:
         self.save(self.save_path)
         self.status_message = f"저장됨: {self.save_path}"
         self.redraw()
+        self._focus_keyboard()
 
     def _close(self) -> None:
         plt.close(self.figure)
+
+    def _focus_keyboard(self) -> None:
+        """Return focus to the interactive canvas after a pointer action.
+
+        ``FigureCanvasTkAgg`` exposes the actual Tk widget.  Other backends
+        (including the Agg backend used for headless rendering) deliberately
+        have no focus operation, so this is safely a no-op there.
+        """
+        get_widget = getattr(self.figure.canvas, "get_tk_widget", None)
+        if get_widget is None:
+            return
+        widget = get_widget()
+        widget.focus_set()
+        widget.after_idle(widget.focus_set)
 
     def redraw(self) -> None:
         env = self.session.env
@@ -286,6 +339,7 @@ class ManualViewer:
                     "구조: E 등반, Q 앵커, R 해제",
                     "대기: Space · 재시작: Home",
                     "저장·종료: 화면 하단 버튼",
+                    "키보드: 지도 영역을 클릭하면 조종 입력에 포커스됩니다.",
                     "",
                     f"현재 허용: {allowed}",
                     "지지 범위를 벗어나면 자동 하강합니다.",
