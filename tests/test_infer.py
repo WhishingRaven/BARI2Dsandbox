@@ -11,7 +11,7 @@ from bari2d.utils.config import ExperimentConfig
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from infer import InferenceSession, discover_checkpoints, load_inference_model
+from scripts.infer import InferenceSession, discover_checkpoints, load_inference_model
 
 
 def _checkpoint(path: Path) -> Path:
