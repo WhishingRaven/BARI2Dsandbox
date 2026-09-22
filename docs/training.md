@@ -83,7 +83,7 @@ q_t=\min\left(\frac{\mathrm{capacity}_t}{\mathrm{target\_load}},1\right)
 
 기본 GRU hidden 크기는 64이며, hidden은 로봇마다 분리된다. 에피소드가 끝나면 hidden을 0으로 초기화한다. actor의 기본 branch hidden은 32, fused hidden은 64이다. 기준 policy는 gru이며, 생물 영감형 기준 policy는 bio_film이다.
 
-CLIMB로 올라간 로봇은 바로 아래 layer 지지 로봇 반경 1.125 밖으로 벗어나면 자동 하강한다. 이 동작은 별도 action이 아니며, actor는 하향 IR을 통해 아래 표면 또는 절벽 신호를 관측한다.
+CLIMB는 같은 layer의 앞쪽 로봇을 밟아 한 층 올라간다. 높은 layer 로봇은 바로 아래 layer 로봇과 본체 면적이 겹치지 않으면 겹치는 가장 높은 하위 로봇의 한 층 위로 낙하하고, 겹치는 로봇이 없으면 layer 0까지 내려간다. 이 동작은 앵커 여부와 무관하고 별도 action이나 모멘트 계산을 사용하지 않으며, actor는 같은 겹침 규칙을 쓰는 하향 IR로 아래 표면 또는 절벽 신호를 관측한다.
 
 ## 5. 보조 표적
 

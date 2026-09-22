@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
+from bari2d.env.bridge_env import BridgeEnv
 from bari2d.env.robot import DiscreteAction, RobotState
 from bari2d.env.sensors import ir_distances, ir_ray_count
+from bari2d.utils.config import EnvironmentConfig
 
 
 def test_robot_moves_and_steers(env) -> None:
@@ -67,10 +70,7 @@ def test_contact_enables_climb(env) -> None:
     assert base.layer == support.layer + 1
 
 
-def test_elevated_robot_automatically_descends_after_leaving_support_range() -> None:
-    from bari2d.env.bridge_env import BridgeEnv
-    from bari2d.utils.config import EnvironmentConfig
-
+def test_elevated_robot_automatically_descends_after_losing_support_overlap() -> None:
     config = EnvironmentConfig()
     config.robot.count = 2
     config.max_steps = 10
@@ -79,10 +79,134 @@ def test_elevated_robot_automatically_descends_after_leaving_support_range() -> 
     climber, support = environment.robots
     climber.layer = 1
     support.layer = 0
-    support.position = climber.position - climber.heading * (config.robot.length * 1.25 - 0.03)
+    support.position = climber.position - climber.heading * (config.robot.length - 0.03)
 
     actions = np.full(2, int(DiscreteAction.IDLE))
     actions[0] = int(DiscreteAction.FORWARD)
     environment.step(actions)
 
     assert climber.layer == 0
+
+
+def test_climb_uses_a_same_layer_robot_to_reach_layer_two() -> None:
+    config = EnvironmentConfig()
+    config.robot.count = 3
+    config.max_steps = 10
+    environment = BridgeEnv(config)
+    environment.reset(seed=5)
+    climber, lower_support, same_layer_support = environment.robots
+    origin = np.array([2.0, environment.field.width / 2.0])
+    climber.position = origin.copy()
+    climber.theta = 0.0
+    climber.layer = 1
+    lower_support.position = origin + np.array([0.1, 0.0])
+    lower_support.layer = 0
+    same_layer_support.position = origin + np.array([0.8, 0.0])
+    same_layer_support.layer = 1
+    environment.set_robot_states(environment.robots)
+
+    actions = np.full(3, int(DiscreteAction.IDLE))
+    actions[climber.robot_id] = int(DiscreteAction.CLIMB)
+    environment.step(actions)
+
+    assert climber.layer == 2
+
+
+def test_same_layer_climb_also_works_above_layer_two() -> None:
+    config = EnvironmentConfig()
+    config.robot.count = 8
+    config.max_steps = 10
+    environment = BridgeEnv(config)
+    environment.reset(seed=8)
+    climber, same_layer_support = environment.robots[:2]
+    origin = np.array([2.0, environment.field.width / 2.0])
+    target = origin + np.array([0.8, 0.0])
+    climber.position = origin.copy()
+    climber.theta = 0.0
+    climber.layer = 3
+    same_layer_support.position = target.copy()
+    same_layer_support.layer = 3
+    for robot, layer in zip(environment.robots[2:5], range(3)):
+        robot.position = origin + np.array([0.1, 0.0])
+        robot.layer = layer
+    for robot, layer in zip(environment.robots[5:], range(3)):
+        robot.position = target.copy()
+        robot.layer = layer
+    environment.set_robot_states(environment.robots)
+
+    actions = np.full(config.robot.count, int(DiscreteAction.IDLE))
+    actions[climber.robot_id] = int(DiscreteAction.CLIMB)
+    environment.step(actions)
+
+    assert climber.layer == 4
+
+
+@pytest.mark.parametrize(
+    ("starting_layer", "overlapping_support_layer", "expected_layer"),
+    [(2, 0, 1), (4, 2, 3)],
+)
+def test_elevated_robot_falls_to_highest_overlapping_support(
+    starting_layer: int, overlapping_support_layer: int, expected_layer: int
+) -> None:
+    config = EnvironmentConfig()
+    config.robot.count = 3 + overlapping_support_layer
+    config.max_steps = 10
+    environment = BridgeEnv(config)
+    environment.reset(seed=6)
+    falling, nearby_without_overlap, overlapping_support = environment.robots[:3]
+    origin = np.array([2.0, environment.field.width / 2.0])
+    falling.position = origin.copy()
+    falling.layer = starting_layer
+    nearby_without_overlap.position = origin + np.array([1.0, 0.0])
+    nearby_without_overlap.layer = starting_layer - 1
+    overlapping_support.position = origin.copy()
+    overlapping_support.layer = overlapping_support_layer
+    for robot, layer in zip(environment.robots[3:], range(overlapping_support_layer)):
+        robot.position = origin.copy()
+        robot.layer = layer
+    environment.set_robot_states(environment.robots)
+
+    environment.step(np.full(config.robot.count, int(DiscreteAction.IDLE)))
+
+    assert falling.layer == expected_layer
+
+
+def test_anchored_robot_still_falls_without_overlapping_support() -> None:
+    config = EnvironmentConfig()
+    config.robot.count = 2
+    config.max_steps = 10
+    environment = BridgeEnv(config)
+    environment.reset(seed=7)
+    falling, distant_robot = environment.robots
+    falling.position = np.array([2.0, environment.field.width / 2.0])
+    falling.layer = 4
+    falling.anchored = True
+    distant_robot.position = falling.position + np.array([2.0, 0.0])
+    distant_robot.layer = 0
+    environment.set_robot_states(environment.robots)
+
+    environment.step(np.full(2, int(DiscreteAction.IDLE)))
+
+    assert falling.layer == 0
+
+
+def test_downward_ir_uses_highest_overlapping_robot_surface(env) -> None:
+    robot, nearby_without_overlap, overlapping_support = env.robots[:3]
+    robot.position = env.field.center.copy()
+    robot.layer = 2
+    nearby_without_overlap.position = robot.position + np.array([1.0, 0.0])
+    nearby_without_overlap.layer = 1
+    overlapping_support.position = robot.position.copy()
+    overlapping_support.layer = 0
+
+    readings = ir_distances(
+        robot,
+        [robot, nearby_without_overlap, overlapping_support],
+        env.field,
+        env.config.robot,
+        env.config.sensor,
+        env.rng,
+    )
+
+    expected = 2 * env.config.robot.climb_height / env.config.sensor.ir_range
+    assert readings[-1] == pytest.approx(expected)

@@ -22,7 +22,7 @@ macOS에서는 고해상도 native Matplotlib 창을 그대로 사용한다. 수
 
 Matplotlib 기본 단축키를 수동 조종 창에서 끄므로 S는 figure 저장이 아니라 후진, Q는 종료가 아니라 ANCHOR로 동작한다. 화면 하단의 저장 버튼은 현재 프레임을 manual.png에 저장하며, --output 경로를 지정했다면 그 파일에 저장한다. 종료 버튼은 창을 닫는다.
 
-로봇은 layer 0부터 layer 10까지 올라갈 수 있다. 별도 DESCEND action은 없지만, 앵커되지 않은 로봇이 바로 아래 layer의 지지 로봇 반경 1.125 밖으로 벗어나면 자동으로 한 layer씩 내려온다. 따라서 CLIMB 뒤 전진해 지지 로봇의 범위를 벗어나면 다시 낮아진다. layer는 2.5D 이산 높이 표현이며, 화면의 로봇 라벨 L0–L10으로 확인한다.
+로봇은 layer 0부터 layer 10까지 올라갈 수 있다. CLIMB는 앞쪽의 같은 layer 로봇을 밟아 한 layer 올라가므로 layer 1 로봇끼리도 layer 2 이상을 만들 수 있다. 별도 DESCEND action은 없으며, 높은 layer 로봇은 바로 아래 layer 로봇과 본체 면적이 겹치지 않으면 겹치는 가장 높은 하위 로봇의 한 layer 위로 자동 낙하한다. 겹치는 하위 로봇이 없으면 layer 0까지 내려가며, 앵커 상태도 이 낙하를 막지 않는다. layer는 2.5D 이산 높이 표현이며, 화면의 로봇 라벨 L0–L10으로 확인한다.
 
 초기 화면을 PNG로 저장하거나 headless 환경에서 확인하려면 다음처럼 실행한다.
 

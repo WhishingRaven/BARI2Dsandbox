@@ -125,6 +125,14 @@ def oriented_box_contact(
     return True, minimum_axis, max(float(minimum_overlap), 0.0)
 
 
+def oriented_boxes_overlap(
+    first: RobotState, second: RobotState, robot_config: RobotConfig
+) -> bool:
+    """Return whether two robot footprints have a positive-area overlap."""
+    touching, _, penetration = oriented_box_contact(first, second, robot_config, tolerance=0.0)
+    return touching and penetration > 1.0e-9
+
+
 class ContactModel:
     def __init__(self, config: ContactConfig, robot_config: RobotConfig):
         self.config = config

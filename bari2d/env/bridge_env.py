@@ -6,7 +6,7 @@ from typing import Any, Iterable
 
 import numpy as np
 
-from bari2d.env.contact_model import ContactGraph, ContactModel
+from bari2d.env.contact_model import ContactGraph, ContactModel, oriented_boxes_overlap
 from bari2d.env.field import LEFT_BANK, RIGHT_BANK, GapField, GapGenerator
 from bari2d.env.load_evaluator import FastLoadEvaluator, IncrementalLoadEvaluator, LoadTestResult
 from bari2d.env.robot import ACTION_COUNT, DiscreteAction, RobotState
@@ -210,9 +210,11 @@ class BridgeEnv:
         return masks
 
     def _climb_support(self, robot: RobotState) -> RobotState | None:
+        if robot.layer >= self.config.robot.max_layer:
+            return None
         candidates: list[tuple[float, RobotState]] = []
         for other in self.robots:
-            if other.robot_id == robot.robot_id or other.fallen or other.layer >= self.config.robot.max_layer:
+            if other.robot_id == robot.robot_id or other.fallen or other.layer != robot.layer:
                 continue
             relative = other.position - robot.position
             distance = float(np.linalg.norm(relative))
@@ -220,29 +222,31 @@ class BridgeEnv:
                 candidates.append((distance, other))
         return min(candidates, key=lambda item: item[0])[1] if candidates else None
 
-    def _lower_layer_support(self, robot: RobotState) -> RobotState | None:
-        """Return the nearby robot directly supporting this elevated layer."""
-        candidates: list[tuple[float, RobotState]] = []
+    def _highest_overlapping_support_layer(self, robot: RobotState) -> int | None:
+        """Return the highest lower layer whose footprint overlaps the robot."""
+        layers: list[int] = []
         for other in self.robots:
-            if other.robot_id == robot.robot_id or other.fallen or other.layer != robot.layer - 1:
+            if other.robot_id == robot.robot_id or other.fallen or other.layer >= robot.layer:
                 continue
-            distance = float(np.linalg.norm(other.position - robot.position))
-            if distance <= self.config.robot.length * 1.25:
-                candidates.append((distance, other))
-        return min(candidates, key=lambda item: item[0])[1] if candidates else None
+            if oriented_boxes_overlap(robot, other, self.config.robot):
+                layers.append(other.layer)
+        return max(layers) if layers else None
 
     def _auto_descend_unsupported(self) -> None:
-        """Lower moving elevated robots once no robot supports the layer below."""
-        for _ in range(self.config.robot.max_layer):
-            changed = False
+        """Drop elevated robots onto the highest overlapping lower footprint."""
+        while True:
+            next_layers: dict[int, int] = {}
             for robot in self.robots:
-                if robot.fallen or robot.anchored or robot.layer == 0:
+                if robot.fallen or robot.layer == 0:
                     continue
-                if self._lower_layer_support(robot) is None:
-                    robot.layer -= 1
-                    changed = True
-            if not changed:
+                support_layer = self._highest_overlapping_support_layer(robot)
+                next_layer = support_layer + 1 if support_layer is not None else 0
+                if next_layer < robot.layer:
+                    next_layers[robot.robot_id] = next_layer
+            if not next_layers:
                 return
+            for robot_id, layer in next_layers.items():
+                self.robots[robot_id].layer = layer
 
     def step(self, actions: np.ndarray | list[int]) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         action_array = np.asarray(actions, dtype=np.int64).copy()
@@ -261,6 +265,12 @@ class BridgeEnv:
         old_failures = self.contact_model.anchor_failures
         previously_used = len(self._used_robots)
         newly_anchored = 0
+        climb_layers = {
+            robot.robot_id: min(robot.layer + 1, self.config.robot.max_layer)
+            for robot, action_value in zip(self.robots, action_array)
+            if DiscreteAction(int(action_value)) == DiscreteAction.CLIMB
+            and self._climb_support(robot) is not None
+        }
         for robot, action_value in zip(self.robots, action_array):
             action = DiscreteAction(int(action_value))
             if action != DiscreteAction.IDLE:
@@ -272,9 +282,9 @@ class BridgeEnv:
             elif action == DiscreteAction.ANCHOR:
                 newly_anchored += int(self.contact_model.anchor(robot, self.robots, self.field))
             elif action == DiscreteAction.CLIMB:
-                support = self._climb_support(robot)
-                if support is not None:
-                    robot.layer = min(support.layer + 1, self.config.robot.max_layer)
+                climb_layer = climb_layers.get(robot.robot_id)
+                if climb_layer is not None:
+                    robot.layer = climb_layer
                     robot.position = robot.position + robot.heading * self.config.robot.length * 0.3
                     robot.energy += self._episode_randomization["robot_mass"] * self.config.robot.climb_height
                 robot.previous_action = int(action)
@@ -294,6 +304,7 @@ class BridgeEnv:
         self.contact_model.resolve_contacts(self.robots)
         for robot in self.robots:
             self._constrain_to_field(robot)
+        self._auto_descend_unsupported()
         self.graph = self.contact_model.build_graph(self.robots, self.field, self.rng)
         self._mark_fallen_robots()
         if sum(robot.fallen for robot in self.robots) > old_fallen:

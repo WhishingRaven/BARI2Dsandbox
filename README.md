@@ -63,7 +63,7 @@ conda run -n bari2d python scripts/manual.py
 
 ## Simulator
 
-`BridgeEnv` exposes a Gym-style `reset`/`step` interface without requiring Gymnasium. Each robot is an oriented rectangle with position, heading, scalar forward velocity, steering, head-lift state, anchor state, local strain, previous action, layer, and optional persistent latent. Planar motion uses bounded kinematics. Same-layer overlap produces a normal positional response, frictional velocity damping, and a strain-producing contact force. A climb command can move a robot onto a nearby supporting robot's discrete height layer. Robots unsupported over the gap fall out of the active mechanical structure.
+`BridgeEnv` exposes a Gym-style `reset`/`step` interface without requiring Gymnasium. Each robot is an oriented rectangle with position, heading, scalar forward velocity, steering, head-lift state, anchor state, local strain, previous action, layer, and optional persistent latent. Planar motion uses bounded kinematics. Same-layer overlap produces a normal positional response, frictional velocity damping, and a strain-producing contact force. A climb command moves a robot one layer above a nearby same-layer robot. An elevated robot remains there only while its footprint overlaps a robot on the layer directly below; otherwise it falls to one layer above the highest overlapping lower robot, or to layer 0 when none overlaps. This support rule does not use moments or exempt anchored robots. Robots unsupported over the gap fall out of the active mechanical structure.
 
 The field uses coordinates relative to a randomized gap normal. It supports gap width, orientation, sinusoidal boundary irregularity, bank shape, random initial poses, friction, anchor strength, mass, sensor noise, and actuator noise. Generated widths are capped to remain feasible for the configured field and robot population.
 
@@ -80,7 +80,7 @@ Every continuous value is normalized. One actor observation contains:
 - normalized target load;
 - optional episode-persistent Gaussian latent.
 
-The four planar IR rays ray-march against robot oriented boxes, circular obstacles, field limits, and bank/gap substrate transitions. The downward IR ray returns the vertical distance to a bank under the robot or to a lower-layer robot inside its support radius; maximum range means there is no supporting surface below (a cliff).
+The four planar IR rays ray-march against robot oriented boxes, circular obstacles, field limits, and bank/gap substrate transitions. The downward IR ray returns the vertical distance to a bank under the robot or to the highest lower-layer robot whose oriented footprint has positive-area overlap; maximum range means there is no supporting surface below (a cliff).
 
 The centralized state and graph are separate methods used only by critics and diagnostics. Tests and model construction preserve this actor/critic boundary.
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from bari2d.env.contact_model import oriented_boxes_overlap
 from bari2d.env.field import GapField
 from bari2d.env.robot import RobotState
 from bari2d.utils.config import RobotConfig, SensorConfig
@@ -28,24 +29,22 @@ def _downward_ir_distance(
 ) -> float:
     """Measure the nearest surface below the robot in the 2.5D approximation.
 
-    A bank under the robot center is ground. Otherwise, a lower-layer robot
-    inside the same support radius used by CLIMB is a surface. No surface is a
-    cliff return at the maximum sensor range.
+    A bank under the robot center is ground. A lower-layer robot is a surface
+    only where its footprint overlaps the sensing robot. No surface is a cliff
+    return at the maximum sensor range.
     """
-    measured = sensor_config.ir_range
+    support_distances: list[float] = []
     if field.bank_at(robot.position) is not None:
-        measured = robot.layer * robot_config.climb_height
-    else:
-        support_distances = [
-            (robot.layer - other.layer) * robot_config.climb_height
-            for other in robots
-            if other.robot_id != robot.robot_id
-            and not other.fallen
-            and other.layer < robot.layer
-            and np.linalg.norm(other.position - robot.position) <= robot_config.length * 1.25
-        ]
-        if support_distances:
-            measured = min(support_distances)
+        support_distances.append(robot.layer * robot_config.climb_height)
+    support_distances.extend(
+        (robot.layer - other.layer) * robot_config.climb_height
+        for other in robots
+        if other.robot_id != robot.robot_id
+        and not other.fallen
+        and other.layer < robot.layer
+        and oriented_boxes_overlap(robot, other, robot_config)
+    )
+    measured = min(support_distances, default=sensor_config.ir_range)
     return float(np.clip(measured / sensor_config.ir_range, 0.0, 1.0))
 
 
