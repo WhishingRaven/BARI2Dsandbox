@@ -167,3 +167,10 @@ def load_config(path: str | Path | None = None) -> ExperimentConfig:
     if not isinstance(values, dict):
         raise TypeError("Configuration root must be a mapping")
     return _update_dataclass(config, values)
+
+
+def config_from_dict(values: dict[str, Any]) -> ExperimentConfig:
+    """Build an experiment configuration embedded in a checkpoint."""
+    if not isinstance(values, dict):
+        raise TypeError("Checkpoint configuration must be a mapping")
+    return _update_dataclass(ExperimentConfig(), values)

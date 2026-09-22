@@ -7,6 +7,8 @@ runs/
 *.gif
 bridge.png
 
+.DS_Store
+
 #LaTex
 *.aux
 *.log
