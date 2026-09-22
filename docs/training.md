@@ -211,7 +211,7 @@ FiLM과 graph critic을 쓰는 policy:
     conda run -n bari2d python scripts/train.py \
       --config configs/bio_film.yaml --updates 1000
 
-비교용 YAML 전체 목록과 설계 의도는 configs/README.md를 참고한다.
+비교용 YAML 전체 목록과 설계 의도는 configs/README.md, 실험군 간 학습 차이는 configurations.md를 참고한다.
 
 Mac에서 MPS를 사용할 수 있으면 train.py의 기본 device가 mps이고, 그렇지 않으면 cpu다. 다른 device는 --device로 지정한다. training config의 output_dir에 checkpoint와 episode log가 저장된다.
 

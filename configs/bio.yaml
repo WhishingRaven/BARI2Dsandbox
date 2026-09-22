@@ -1,14 +1,15 @@
+# Multi-branch actor without target-load FiLM conditioning.
 environment:
   seed: 7
   curriculum_stage: 1
   max_steps: 400
   latent_sigma: 0.0
 model:
-  architecture: bio_film
+  architecture: bio
   branch_hidden: 48
   fused_hidden: 64
   recurrent_hidden: 64
-  film: true
+  film: false
   use_heterogeneity: false
 training:
   total_updates: 1000
@@ -16,4 +17,4 @@ training:
   learning_rate: 0.0003
   auxiliary_coef: 0.1
   critic: graph
-  output_dir: runs/bio_film
+  output_dir: runs/bio

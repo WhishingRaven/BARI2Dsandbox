@@ -1,3 +1,4 @@
+# Multi-branch actor with target-load FiLM conditioning and graph critic.
 environment:
   seed: 7
   curriculum_stage: 1
