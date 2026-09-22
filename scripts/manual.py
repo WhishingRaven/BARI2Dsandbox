@@ -10,18 +10,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-import os
 from pathlib import Path
-import sys
-
-import matplotlib
-
-# The native macOS canvas can leave keyboard focus with the window chrome or a
-# toolbar.  The Tk canvas has an explicit focus API, which makes the manual
-# controller reliable when it is launched as a program.  Do not override an
-# explicitly requested backend: ``MPLBACKEND=Agg`` remains the headless path.
-if __name__ == "__main__" and sys.platform == "darwin" and not os.environ.get("MPLBACKEND"):
-    matplotlib.use("TkAgg")
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -102,16 +91,17 @@ def configure_plot_fonts() -> None:
 
 
 def configure_manual_keymap() -> None:
-    """Reserve S and Q for robot control instead of Matplotlib shortcuts."""
+    """Reserve controller keys and remove the competing navigation toolbar."""
     for keymap in ("keymap.save", "keymap.quit", "keymap.quit_all", "keymap.home"):
         plt.rcParams[keymap] = []
+    plt.rcParams["toolbar"] = "None"
 
 
 def normalize_control_key(key: str | None) -> str | None:
     """Map case and Korean two-beolsik input to a controller key."""
     if key is None:
         return None
-    normalized = key.lower()
+    normalized = key.lower().split("+")[-1]
     return KOREAN_KEY_ALIASES.get(normalized, normalized)
 
 

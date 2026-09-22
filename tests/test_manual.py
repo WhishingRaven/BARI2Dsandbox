@@ -29,6 +29,7 @@ def test_manual_keymap_reserves_robot_control_keys() -> None:
 
     assert "s" not in plt.rcParams["keymap.save"]
     assert "q" not in plt.rcParams["keymap.quit"]
+    assert plt.rcParams["toolbar"] == "None"
 
 
 def test_manual_control_keys_accept_korean_input_source() -> None:
@@ -36,6 +37,7 @@ def test_manual_control_keys_accept_korean_input_source() -> None:
     assert normalize_control_key("ㅈ") == "w"
     assert normalize_control_key("ㄴ") == "s"
     assert normalize_control_key("ㅂ") == "q"
+    assert normalize_control_key("cmd+w") == "w"
 
 
 def test_manual_keyboard_controls_do_not_save_or_close_the_figure(tmp_path: Path) -> None:
