@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
+import matplotlib.pyplot as plt
 import numpy as np
 
 from bari2d.env.robot import DiscreteAction
@@ -10,7 +12,7 @@ from bari2d.utils.config import EnvironmentConfig
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scripts.manual import ManualSession
+from scripts.manual import ManualSession, ManualViewer, configure_manual_keymap
 from bari2d.utils.visualization import robot_layer_color
 
 
@@ -20,6 +22,33 @@ def test_default_max_layer_is_ten() -> None:
 
 def test_layer_colors_distinguish_the_lowest_and_highest_layers() -> None:
     assert robot_layer_color(0, 10) != robot_layer_color(10, 10)
+
+
+def test_manual_keymap_reserves_robot_control_keys() -> None:
+    configure_manual_keymap()
+
+    assert "s" not in plt.rcParams["keymap.save"]
+    assert "q" not in plt.rcParams["keymap.quit"]
+
+
+def test_manual_keyboard_controls_do_not_save_or_close_the_figure(tmp_path: Path) -> None:
+    config = EnvironmentConfig()
+    config.robot.count = 2
+    session = ManualSession(config, seed=2)
+    snapshot = tmp_path / "manual.png"
+    viewer = ManualViewer(session, save_path=snapshot)
+
+    viewer._on_key(SimpleNamespace(key="s"))
+    assert session.env.step_count == 1
+    assert not snapshot.exists()
+
+    viewer._on_key(SimpleNamespace(key="q"))
+    assert session.env.step_count == 2
+    assert plt.fignum_exists(viewer.figure.number)
+
+    viewer._save()
+    assert snapshot.is_file()
+    viewer._close()
 
 
 def test_manual_session_only_commands_the_selected_robot() -> None:

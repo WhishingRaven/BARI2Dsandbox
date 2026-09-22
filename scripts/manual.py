@@ -75,6 +75,12 @@ def configure_plot_fonts() -> None:
     plt.rcParams["axes.unicode_minus"] = False
 
 
+def configure_manual_keymap() -> None:
+    """Reserve S and Q for robot control instead of Matplotlib shortcuts."""
+    for keymap in ("keymap.save", "keymap.quit", "keymap.quit_all", "keymap.home"):
+        plt.rcParams[keymap] = []
+
+
 @dataclass
 class ManualStep:
     action: DiscreteAction
@@ -141,9 +147,12 @@ class ManualSession:
 class ManualViewer:
     """Matplotlib keyboard and mouse controls over a ManualSession."""
 
-    def __init__(self, session: ManualSession):
+    def __init__(self, session: ManualSession, save_path: Path = Path("manual.png")):
         configure_plot_fonts()
+        configure_manual_keymap()
         self.session = session
+        self.save_path = save_path
+        self.status_message = ""
         self.figure = plt.figure(figsize=(15, 8.5))
         self.world_axis = self.figure.add_axes((0.05, 0.08, 0.64, 0.86))
         self.status_axis = self.figure.add_axes((0.72, 0.48, 0.25, 0.46))
@@ -164,10 +173,18 @@ class ManualViewer:
             button = Button(axis, label)
             button.on_clicked(lambda _event, selected=action: self._execute(selected))
             self.buttons.append(button)
-        reset_axis = self.figure.add_axes((0.72, 0.045, 0.24, 0.05))
-        reset = Button(reset_axis, "Home  다시 시작")
+        reset_axis = self.figure.add_axes((0.72, 0.045, 0.075, 0.05))
+        reset = Button(reset_axis, "다시 시작")
         reset.on_clicked(lambda _event: self._reset())
         self.buttons.append(reset)
+        save_axis = self.figure.add_axes((0.803, 0.045, 0.075, 0.05))
+        save = Button(save_axis, "저장")
+        save.on_clicked(lambda _event: self._save())
+        self.buttons.append(save)
+        close_axis = self.figure.add_axes((0.886, 0.045, 0.075, 0.05))
+        close = Button(close_axis, "종료")
+        close.on_clicked(lambda _event: self._close())
+        self.buttons.append(close)
 
     def _on_key(self, event) -> None:
         key = event.key
@@ -179,7 +196,7 @@ class ManualViewer:
             self._reset()
             return
         elif key == "escape":
-            plt.close(self.figure)
+            self._close()
             return
         elif key in KEY_ACTIONS:
             self._execute(KEY_ACTIONS[key])
@@ -205,7 +222,16 @@ class ManualViewer:
 
     def _reset(self) -> None:
         self.session.reset()
+        self.status_message = "에피소드를 다시 시작했습니다."
         self.redraw()
+
+    def _save(self) -> None:
+        self.save(self.save_path)
+        self.status_message = f"저장됨: {self.save_path}"
+        self.redraw()
+
+    def _close(self) -> None:
+        plt.close(self.figure)
 
     def redraw(self) -> None:
         env = self.session.env
@@ -259,9 +285,11 @@ class ManualViewer:
                     "운동: W/S, A/D, Z/C",
                     "구조: E 등반, Q 앵커, R 해제",
                     "대기: Space · 재시작: Home",
+                    "저장·종료: 화면 하단 버튼",
                     "",
                     f"현재 허용: {allowed}",
                     "지지 범위를 벗어나면 자동 하강합니다.",
+                    self.status_message,
                 ]
             ),
             va="top",
@@ -294,7 +322,7 @@ def main() -> None:
         stage=args.stage,
         target_load=args.target_load,
     )
-    viewer = ManualViewer(session)
+    viewer = ManualViewer(session, save_path=args.output or Path("manual.png"))
     if args.output is not None:
         viewer.save(args.output)
         print(f"Saved manual control view to {args.output}")
