@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from bari2d.rl.trainer import Trainer
 from bari2d.utils.config import ExperimentConfig
 
@@ -23,4 +25,9 @@ def test_recurrent_mappo_completes_one_update(tmp_path, capsys) -> None:
     assert "Update 1/1" in output
     assert "actor_loss=" in output
     assert (tmp_path / "checkpoint_000001.pt").exists()
-    assert (tmp_path / "episodes.jsonl").exists()
+    episode_path = tmp_path / "episodes.jsonl"
+    assert episode_path.exists()
+    episode = json.loads(episode_path.read_text(encoding="utf-8").splitlines()[0])
+    assert "episode_reward" in episode
+    assert "gap_progress" in episode["reward_component_totals"]
+    assert len(episode["agent_rewards"]) == config.environment.robot.count

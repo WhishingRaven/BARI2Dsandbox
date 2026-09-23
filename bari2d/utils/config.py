@@ -52,8 +52,8 @@ class GapConfig:
     width_min: float = 3.0
     width_max: float = 5.0
     orientation_deg: float = 0.0
-    orientation_jitter_deg: float = 0.0
-    irregularity: float = 0.0
+    orientation_jitter_deg: float = 18.0
+    irregularity: float = 0.35
     irregularity_frequency: float = 0.8
 
 
@@ -72,10 +72,12 @@ class LoadConfig:
 class RewardConfig:
     span_delta: float = 2.0
     mechanical_delta: float = 2.0
+    gap_progress: float = 0.5
     time_penalty: float = 0.002
+    idle_penalty: float = 0.001
     energy_penalty: float = 0.01
     anchor_penalty: float = 0.015
-    robot_use_penalty: float = 0.01
+    robot_use_penalty: float = 0.0
     collapse_penalty: float = 1.0
     success_reward: float = 10.0
 
@@ -115,7 +117,8 @@ class TrainingConfig:
     gamma: float = 0.99
     gae_lambda: float = 0.95
     clip_ratio: float = 0.2
-    entropy_coef: float = 0.01
+    entropy_coef: float = 0.03
+    agent_credit_coef: float = 0.5
     value_coef: float = 0.5
     auxiliary_coef: float = 0.1
     max_grad_norm: float = 0.5

@@ -47,14 +47,13 @@ bio_film은 latent_sigma 0이므로 동일형 정책이다. 이 비교는 역할
 
 ### curriculum
 
-모든 설정은 기본 TrainingConfig에서 curriculum_enabled가 true이므로 성공률 기준으로 1단계에서 4단계까지 진행할 수 있다. curriculum.yaml은 그 위에 다음 환경 변화를 명시한다.
+모든 설정은 기본 TrainingConfig에서 curriculum_enabled가 true이므로 성공률 기준으로 1단계에서 4단계까지 진행할 수 있다. 모든 설정의 기본 지형은 단계에 따라 폭·방향·경계 불규칙성의 표본 범위를 25%, 50%, 75%, 100%로 넓히고, 로봇 초기 위치와 방향은 매 episode 무작위화한다. curriculum.yaml은 그 위에 다음 환경 변화를 명시한다.
 
-- 3단계부터 방향 jitter 18°와 경계 irregularity 0.35
-- 2단계부터 간극 폭 [3, 5]
+- 기본값과 같은 최대 방향 jitter 18°, 경계 irregularity 0.35, 간극 폭 [3, 5]를 명시
 - 모든 단계에서 sensor noise와 actuator noise 0.015
 - 별도 output_dir인 runs/curriculum
 
-따라서 curriculum.yaml은 커리큘럼 자체의 on/off 비교라기보다, 더 강한 관측·구동기 잡음과 간극 무작위화를 쓰는 GRU 기준선이다.
+따라서 curriculum.yaml은 커리큘럼 자체의 on/off 비교라기보다, 모든 단계에서 더 강한 관측·구동기 잡음을 쓰는 GRU 기준선이다.
 
 ## Critic 비교의 주의점
 

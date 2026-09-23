@@ -9,6 +9,36 @@ from bari2d.env.sensors import ir_distances, ir_ray_count
 from bari2d.utils.config import EnvironmentConfig
 
 
+def test_reset_randomizes_robot_positions_headings_and_terrain_reproducibly() -> None:
+    config = EnvironmentConfig()
+    first = BridgeEnv(config)
+    first.reset(seed=21)
+    first_positions = np.stack([robot.position for robot in first.robots])
+    first_headings = np.asarray([robot.theta for robot in first.robots])
+    first_terrain = (first.field.gap_width, first.field.orientation, first.field.irregularity)
+
+    repeated = BridgeEnv(config)
+    repeated.reset(seed=21)
+    different = BridgeEnv(config)
+    different.reset(seed=22)
+
+    assert np.allclose(first_positions, np.stack([robot.position for robot in repeated.robots]))
+    assert np.allclose(first_headings, [robot.theta for robot in repeated.robots])
+    assert first_terrain == (
+        repeated.field.gap_width,
+        repeated.field.orientation,
+        repeated.field.irregularity,
+    )
+    assert not np.allclose(first_positions, np.stack([robot.position for robot in different.robots]))
+    assert not np.allclose(first_headings, [robot.theta for robot in different.robots])
+    assert first_terrain != (
+        different.field.gap_width,
+        different.field.orientation,
+        different.field.irregularity,
+    )
+    assert np.std(first_headings) > 0.5
+
+
 def test_robot_moves_and_steers(env) -> None:
     robot = env.robots[0]
     initial_position = robot.position.copy()
@@ -80,6 +110,7 @@ def test_elevated_robot_automatically_descends_after_losing_support_overlap() ->
     climber.layer = 1
     support.layer = 0
     support.position = climber.position - climber.heading * (config.robot.length - 0.03)
+    support.theta = climber.theta
 
     actions = np.full(2, int(DiscreteAction.IDLE))
     actions[0] = int(DiscreteAction.FORWARD)

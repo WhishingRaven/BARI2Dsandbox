@@ -58,6 +58,7 @@ class MAPPO:
                 )
                 ratio = torch.exp(log_probabilities - batch.old_log_probabilities[:, agents])
                 advantages = batch.advantages[:, None].expand_as(ratio)
+                advantages = advantages + config.agent_credit_coef * batch.agent_advantages[:, agents]
                 unclipped = ratio * advantages
                 clipped = torch.clamp(ratio, 1.0 - config.clip_ratio, 1.0 + config.clip_ratio) * advantages
                 policy_loss = -torch.minimum(unclipped, clipped).mean()

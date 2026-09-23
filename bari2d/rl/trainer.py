@@ -65,6 +65,8 @@ class Trainer:
         policy_statistics = PolicyStatistics(self.env.action_count)
         history: list[dict[str, float]] = []
         episode_number = 0
+        episode_reward = 0.0
+        reward_component_totals: dict[str, float] = {}
         last_done = False
         for update in range(1, update_count + 1):
             buffer = RolloutBuffer(
@@ -98,6 +100,9 @@ class Trainer:
                 action_values = actions.cpu().numpy()
                 policy_statistics.add(action_values, output.latents)
                 next_observation, reward, terminated, truncated, info = self.env.step(action_values)
+                episode_reward += reward
+                for name, component_value in info["reward_components"].items():
+                    reward_component_totals[name] = reward_component_totals.get(name, 0.0) + float(component_value)
                 done = terminated or truncated
                 buffer.add(
                     observation,
@@ -107,6 +112,7 @@ class Trainer:
                     action_masks,
                     episode_start,
                     reward,
+                    info["agent_rewards"],
                     float(value.cpu()),
                     done,
                     info["auxiliary_targets"],
@@ -118,8 +124,14 @@ class Trainer:
                 if done:
                     episode_number += 1
                     episode_log: dict[str, Any] = dict(info)
+                    episode_log["episode_reward"] = episode_reward
+                    episode_log["reward_component_totals"] = reward_component_totals
                     episode_log.update(policy_statistics.summarize())
-                    episode_log.update(episode=episode_number, update=update, curriculum_stage=self.env.config.curriculum_stage)
+                    episode_log.update(
+                        episode=episode_number,
+                        update=update,
+                        curriculum_stage=self.env.config.curriculum_stage,
+                    )
                     advanced = self.curriculum.record(bool(info["success"]), self.env)
                     episode_log["curriculum_advanced"] = advanced
                     self.logger.log(episode_log)
@@ -127,6 +139,8 @@ class Trainer:
                     hidden = self.actor.initial_hidden(self.env.config.robot.count, self.device)
                     episode_start = np.ones(self.env.config.robot.count, dtype=np.float32)
                     policy_statistics = PolicyStatistics(self.env.action_count)
+                    episode_reward = 0.0
+                    reward_component_totals = {}
             with torch.no_grad():
                 if last_done:
                     last_value = 0.0

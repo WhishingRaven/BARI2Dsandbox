@@ -16,6 +16,7 @@ class RolloutBatch:
     reset_masks: torch.Tensor
     returns: torch.Tensor
     advantages: torch.Tensor
+    agent_advantages: torch.Tensor
     initial_hidden: torch.Tensor
     auxiliary_targets: dict[str, torch.Tensor]
     graph_nodes: torch.Tensor | None = None
@@ -48,6 +49,8 @@ class RolloutBuffer:
         self.dones = np.zeros(horizon, dtype=np.float32)
         self.returns = np.zeros(horizon, dtype=np.float32)
         self.advantages = np.zeros(horizon, dtype=np.float32)
+        self.agent_rewards = np.zeros((horizon, robot_count), dtype=np.float32)
+        self.agent_advantages = np.zeros((horizon, robot_count), dtype=np.float32)
         self.initial_hidden = np.zeros((robot_count, hidden_size), dtype=np.float32)
         self.auxiliary_targets = {
             "connectivity": np.zeros((horizon, robot_count), dtype=np.float32),
@@ -72,6 +75,7 @@ class RolloutBuffer:
         action_masks: np.ndarray,
         reset_mask: np.ndarray,
         reward: float,
+        agent_rewards: np.ndarray,
         value: float,
         done: bool,
         auxiliary_targets: dict[str, np.ndarray],
@@ -87,6 +91,7 @@ class RolloutBuffer:
         self.action_masks[index] = action_masks
         self.reset_masks[index] = reset_mask
         self.rewards[index] = reward
+        self.agent_rewards[index] = agent_rewards
         self.values[index] = value
         self.dones[index] = done
         for name, values in auxiliary_targets.items():
@@ -113,6 +118,15 @@ class RolloutBuffer:
         standard_deviation = float(self.advantages.std())
         self.advantages = (self.advantages - mean) / (standard_deviation + 1.0e-8)
 
+        discounted_credit = np.zeros(self.robot_count, dtype=np.float32)
+        for step in reversed(range(self.horizon)):
+            continuation = 1.0 - self.dones[step]
+            discounted_credit = self.agent_rewards[step] + gamma * continuation * discounted_credit
+            self.agent_advantages[step] = discounted_credit
+        credit_mean = float(self.agent_advantages.mean())
+        credit_std = float(self.agent_advantages.std())
+        self.agent_advantages = (self.agent_advantages - credit_mean) / (credit_std + 1.0e-8)
+
     def as_tensors(self, device: torch.device | str) -> RolloutBatch:
         tensor = lambda values, dtype=None: torch.as_tensor(values, dtype=dtype, device=device)
         return RolloutBatch(
@@ -124,6 +138,7 @@ class RolloutBuffer:
             reset_masks=tensor(self.reset_masks),
             returns=tensor(self.returns),
             advantages=tensor(self.advantages),
+            agent_advantages=tensor(self.agent_advantages),
             initial_hidden=tensor(self.initial_hidden),
             auxiliary_targets={name: tensor(values) for name, values in self.auxiliary_targets.items()},
             graph_nodes=None if self.graph_nodes is None else tensor(self.graph_nodes),

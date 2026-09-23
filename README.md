@@ -148,11 +148,11 @@ The baseline centralized critic is an MLP over flattened simulator state. The gr
 
 The trainer collects team rewards with per-agent actions and log probabilities, computes GAE, and applies clipped PPO updates. Agent sequences remain time-major during updates so the shared GRU receives backpropagation through time; reset masks clear hidden state at episode boundaries. The centralized value loss and branch-specific auxiliary losses are optimized separately from decentralized action selection.
 
-Curriculum stage advances when a rolling success window reaches the configured threshold:
+Robot positions and headings are randomized on every reset. Gap width, orientation, and boundary irregularity are randomized at every curriculum stage, with the sampled range expanding as difficulty increases. Curriculum stage advances when a rolling success window reaches the configured threshold:
 
-1. straight, narrow, deterministic gap and low load;
-2. randomized gap width, target, and starting poses;
-3. irregular and rotated boundaries with the full width range;
+1. 25% of the configured terrain-randomization range and low load;
+2. 50% of the terrain range and randomized target load;
+3. 75% of the terrain range;
 4. friction, mass, anchor strength, sensor noise, and actuator noise randomization.
 
 ## Outputs

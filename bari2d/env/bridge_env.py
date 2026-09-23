@@ -80,6 +80,7 @@ class BridgeEnv:
         self._total_motion = 0.0
         self._fallen_count = 0
         self._used_robots: set[int] = set()
+        self._robot_max_gap_progress = np.zeros(self.config.robot.count, dtype=np.float32)
         self._episode_randomization: dict[str, float] = {}
 
     @property
@@ -117,6 +118,10 @@ class BridgeEnv:
         self._total_motion = 0.0
         self._fallen_count = 0
         self._used_robots.clear()
+        self._robot_max_gap_progress = np.asarray(
+            [self.field.normalized_progress(robot.position) for robot in self.robots],
+            dtype=np.float32,
+        )
         self._previous_contacts = set(self.graph.edges)
         self._ir_history.fill(1.0)
         self._strain_history.fill(0.0)
@@ -156,26 +161,33 @@ class BridgeEnv:
     def _initial_robots(self) -> list[RobotState]:
         count = self.config.robot.count
         robot_config = self.config.robot
-        longitudinal_left, _ = self.field.boundaries(0.0)
-        edge_center = self.field.center + self.field.normal * longitudinal_left
-        rows = max(1, int(np.floor(self.field.width / (robot_config.width * 1.5))))
-        rows = min(rows, count)
+        half_diagonal = 0.5 * float(np.hypot(robot_config.length, robot_config.width))
+        lateral_limit = self.field.width / 2.0 - half_diagonal - 0.05
+        staging_depth = max(2.5, robot_config.length * 3.0)
         robots: list[RobotState] = []
-        for robot_id in range(count):
-            row = robot_id % rows
-            column = robot_id // rows
-            lateral = (row - (rows - 1) / 2.0) * robot_config.width * 1.35
-            backward = 0.7 + column * robot_config.length * 1.15
-            position = edge_center - self.field.normal * backward + self.field.tangent * lateral
-            if self.config.curriculum_stage >= 2:
-                position += self.rng.normal(0.0, 0.08, size=2)
-                theta = self.field.orientation + float(self.rng.normal(0.0, 0.12))
-            else:
-                theta = self.field.orientation
-            position[0] = np.clip(position[0], robot_config.length / 2.0, self.field.length - robot_config.length / 2.0)
-            position[1] = np.clip(position[1], robot_config.width / 2.0, self.field.width - robot_config.width / 2.0)
+        maximum_attempts = max(500, count * 250)
+        for _ in range(maximum_attempts):
+            if len(robots) >= count:
+                break
+            lateral = float(self.rng.uniform(-lateral_limit, lateral_limit))
+            longitudinal_left, _ = self.field.boundaries(lateral)
+            backward = float(self.rng.uniform(half_diagonal + 0.05, staging_depth))
+            position = (
+                self.field.center
+                + self.field.normal * (longitudinal_left - backward)
+                + self.field.tangent * lateral
+            )
+            theta = float(self.rng.uniform(-np.pi, np.pi))
             latent = self.rng.normal(0.0, self.config.latent_sigma, size=self.config.latent_dim).astype(np.float32)
-            robots.append(RobotState(robot_id, position.astype(float), float(theta), latent=latent))
+            candidate = RobotState(len(robots), position.astype(float), theta, latent=latent)
+            corners = candidate.corners(robot_config)
+            if not all(self.field.inside(corner) and self.field.bank_at(corner) == LEFT_BANK for corner in corners):
+                continue
+            if any(oriented_boxes_overlap(candidate, other, robot_config) for other in robots):
+                continue
+            robots.append(candidate)
+        if len(robots) != count:
+            raise RuntimeError(f"Could not place {count} randomized robots on the left bank")
         return robots
 
     def set_robot_states(self, robots: Iterable[RobotState]) -> None:
@@ -194,6 +206,10 @@ class BridgeEnv:
         self.graph = self.contact_model.build_graph(self.robots, self.field, self.rng)
         self.current_progress = self.graph.spanning_progress(self.robots, self.field)
         self.current_capacity = self.fast_evaluator.evaluate(self.graph, self.config.load).capacity
+        self._robot_max_gap_progress = np.asarray(
+            [self.field.normalized_progress(robot.position) for robot in self.robots],
+            dtype=np.float32,
+        )
 
     def action_masks(self) -> np.ndarray:
         masks = np.ones((len(self.robots), ACTION_COUNT), dtype=bool)
@@ -258,13 +274,17 @@ class BridgeEnv:
         invalid = ~masks[np.arange(len(self.robots)), action_array]
         action_array[invalid] = int(DiscreteAction.IDLE)
 
+        old_positions = np.stack([robot.position.copy() for robot in self.robots])
+        old_energies = np.asarray([robot.energy for robot in self.robots], dtype=np.float32)
+        old_fallen_by_robot = np.asarray([robot.fallen for robot in self.robots], dtype=bool)
         old_progress = self.current_progress
         old_quality = min(self.current_capacity / max(self.target_load, 1.0e-9), 1.0)
-        old_energy = sum(robot.energy for robot in self.robots)
         old_fallen = sum(robot.fallen for robot in self.robots)
         old_failures = self.contact_model.anchor_failures
         previously_used = len(self._used_robots)
+        previously_used_ids = set(self._used_robots)
         newly_anchored = 0
+        newly_anchored_ids: set[int] = set()
         climb_layers = {
             robot.robot_id: min(robot.layer + 1, self.config.robot.max_layer)
             for robot, action_value in zip(self.robots, action_array)
@@ -280,7 +300,10 @@ class BridgeEnv:
             if action == DiscreteAction.RELEASE:
                 self.contact_model.release(robot)
             elif action == DiscreteAction.ANCHOR:
-                newly_anchored += int(self.contact_model.anchor(robot, self.robots, self.field))
+                anchored = self.contact_model.anchor(robot, self.robots, self.field)
+                newly_anchored += int(anchored)
+                if anchored:
+                    newly_anchored_ids.add(robot.robot_id)
             elif action == DiscreteAction.CLIMB:
                 climb_layer = climb_layers.get(robot.robot_id)
                 if climb_layer is not None:
@@ -300,6 +323,7 @@ class BridgeEnv:
                 robot.previous_action = int(action)
             self._constrain_to_field(robot)
 
+        post_action_positions = np.stack([robot.position.copy() for robot in self.robots])
         self._auto_descend_unsupported()
         self.contact_model.resolve_contacts(self.robots)
         for robot in self.robots:
@@ -332,13 +356,66 @@ class BridgeEnv:
         truncated = time_limit and not terminated
 
         new_quality = min(self.current_capacity / max(self.target_load, 1.0e-9), 1.0)
-        energy_delta = sum(robot.energy for robot in self.robots) - old_energy
-        collapsed = sum(robot.fallen for robot in self.robots) - old_fallen
+        energy_by_robot = np.asarray(
+            [robot.energy for robot in self.robots], dtype=np.float32
+        ) - old_energies
+        energy_delta = float(energy_by_robot.sum())
+        newly_fallen_by_robot = np.asarray(
+            [robot.fallen for robot in self.robots], dtype=bool
+        ) & ~old_fallen_by_robot
+        collapsed = int(newly_fallen_by_robot.sum())
+        gap_progress_by_robot = np.zeros(len(self.robots), dtype=np.float32)
+        for robot, old_position, post_action_position in zip(
+            self.robots, old_positions, post_action_positions
+        ):
+            if not (
+                self.field.is_gap(old_position)
+                or self.field.is_gap(post_action_position)
+            ):
+                continue
+            progress = self.field.normalized_progress(post_action_position)
+            previous_maximum = float(self._robot_max_gap_progress[robot.robot_id])
+            if progress > previous_maximum:
+                gap_progress_by_robot[robot.robot_id] = progress - previous_maximum
+                self._robot_max_gap_progress[robot.robot_id] = progress
         reward_config = self.config.reward
+        idle_by_robot = np.asarray(
+            [
+                action_value == int(DiscreteAction.IDLE) and not old_fallen_by_robot[index]
+                for index, action_value in enumerate(action_array)
+            ],
+            dtype=np.float32,
+        )
+        idle_by_robot *= -reward_config.idle_penalty
+        anchor_by_robot = np.asarray(
+            [
+                -reward_config.anchor_penalty if index in newly_anchored_ids else 0.0
+                for index in range(len(self.robots))
+            ],
+            dtype=np.float32,
+        )
+        newly_used_ids = self._used_robots - previously_used_ids
+        robot_use_by_robot = np.asarray(
+            [
+                -reward_config.robot_use_penalty if index in newly_used_ids else 0.0
+                for index in range(len(self.robots))
+            ],
+            dtype=np.float32,
+        )
+        agent_rewards = (
+            reward_config.gap_progress * gap_progress_by_robot
+            - reward_config.energy_penalty * energy_by_robot
+            + idle_by_robot
+            + anchor_by_robot
+            + robot_use_by_robot
+            - reward_config.collapse_penalty * newly_fallen_by_robot.astype(np.float32)
+        ).astype(np.float32)
         reward_components = {
             "span": reward_config.span_delta * (self.current_progress - old_progress),
             "mechanical": reward_config.mechanical_delta * (new_quality - old_quality),
+            "gap_progress": reward_config.gap_progress * float(gap_progress_by_robot.sum()),
             "time": -reward_config.time_penalty,
+            "idle": float(idle_by_robot.sum()),
             "energy": -reward_config.energy_penalty * energy_delta,
             "anchor": -reward_config.anchor_penalty * newly_anchored,
             "robot_use": -reward_config.robot_use_penalty * (len(self._used_robots) - previously_used),
@@ -353,6 +430,8 @@ class BridgeEnv:
             accurate_capacity=accurate_capacity,
             new_anchor_failures=self.contact_model.anchor_failures - old_failures,
             auxiliary_targets=self.auxiliary_targets(),
+            agent_rewards=agent_rewards,
+            gap_progress_by_robot=gap_progress_by_robot,
         )
         return self.observations(), float(sum(reward_components.values())), terminated, truncated, info
 

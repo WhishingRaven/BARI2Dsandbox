@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
+from unittest.mock import Mock
 
+import matplotlib.pyplot as plt
+import numpy as np
 import torch
 
 from bari2d.env.bridge_env import BridgeEnv
@@ -11,7 +14,7 @@ from bari2d.utils.config import ExperimentConfig, config_from_dict
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scripts.infer import InferenceSession, discover_checkpoints, load_inference_model
+from scripts.infer import InferenceSession, InferenceViewer, discover_checkpoints, load_inference_model
 
 
 def _checkpoint(path: Path) -> Path:
@@ -41,6 +44,40 @@ def test_inference_session_runs_policy_only_step(tmp_path: Path) -> None:
     session.step()
     assert session.env.step_count == 1
     assert session.last_prediction is not None
+
+
+def test_inference_reset_advances_to_a_new_randomized_episode(tmp_path: Path) -> None:
+    checkpoint = _checkpoint(tmp_path / "model.pt")
+    loaded = load_inference_model(checkpoint, None, torch.device("cpu"))
+    session = InferenceSession(loaded, torch.device("cpu"), seed=3)
+    first_positions = np.stack([robot.position.copy() for robot in session.env.robots])
+
+    session.reset()
+
+    second_positions = np.stack([robot.position.copy() for robot in session.env.robots])
+    assert not np.allclose(first_positions, second_positions)
+
+
+def test_viewer_refresh_draws_frame_immediately(tmp_path: Path) -> None:
+    checkpoint = _checkpoint(tmp_path / "model.pt")
+    viewer = InferenceViewer(
+        [checkpoint],
+        fallback_config=None,
+        device=torch.device("cpu"),
+        seed=3,
+        stage=None,
+        target_load=None,
+        deterministic=False,
+        interval_ms=150,
+    )
+    viewer.figure.canvas.draw = Mock()
+    viewer.figure.canvas.draw_idle = Mock()
+
+    viewer.refresh()
+
+    viewer.figure.canvas.draw.assert_called_once_with()
+    viewer.figure.canvas.draw_idle.assert_not_called()
+    plt.close(viewer.figure)
 
 
 def test_legacy_checkpoint_config_keeps_its_original_sensor_layout() -> None:

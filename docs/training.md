@@ -36,7 +36,9 @@
 r_t =
 r_{\mathrm{span}}+
 r_{\mathrm{mechanical}}+
+r_{\mathrm{gap\ progress}}+
 r_{\mathrm{time}}+
+r_{\mathrm{idle}}+
 r_{\mathrm{energy}}+
 r_{\mathrm{anchor}}+
 r_{\mathrm{robot\_use}}+
@@ -56,14 +58,16 @@ q_t=\min\left(\frac{\mathrm{capacity}_t}{\mathrm{target\_load}},1\right)
 | --- | --- | ---: | --- |
 | span | \(2.0(p_t-p_{t-1})\) | 2.0 | 좌측 제방 연결 component의 전진 진행도 증가 |
 | mechanical | \(2.0(q_t-q_{t-1})\) | 2.0 | 목표 하중을 지지할 수 있는 구조 용량 증가 |
+| gap_progress | \(0.5\sum_i \Delta p^{\max}_{t,i}\) | 0.5 | 간극 안에서 각 로봇이 오른쪽 제방 방향으로 갱신한 최고 진행도 |
 | time | \(-0.002\) | 0.002 | 불필요하게 긴 건설 억제 |
+| idle | \(-0.001 n_{\mathrm{idle}}\) | 0.001 | 낙하하지 않은 로봇의 장시간 정지 억제 |
 | energy | \(-0.01\Delta E_t\) | 0.01 | 이동·조향·등반 에너지 절약 |
 | anchor | \(-0.015 n_{\mathrm{new\ anchor}}\) | 0.015 | 과도한 앵커 사용 억제 |
-| robot_use | \(-0.01 n_{\mathrm{first\ use}}\) | 0.01 | 필요한 로봇 수 최소화 |
+| robot_use | \(0.0\) | 0.0 | 초기 탐색에서 로봇 사용 자체를 벌하지 않음 |
 | collapse | \(-1.0 n_{\mathrm{new\ fall}}\) | 1.0 | 새 낙하에 강한 벌점 |
 | success | \(+10.0\) | 10.0 | 정밀 시험을 통과한 제방 간 구조 완성 |
 
-여기서 진행도 \(p_t\)는 좌측 제방에 연결된 로봇 중 간극을 가장 멀리 건넌 위치의 정규화 값이다. anchor 벌점은 이번 step에 실제로 새로 연결된 앵커만 세며, robot_use 벌점은 한 로봇이 에피소드에서 처음으로 IDLE 이외 action을 선택했을 때 한 번만 발생한다.
+여기서 진행도 \(p_t\)는 좌측 제방에 연결된 로봇 중 간극을 가장 멀리 건넌 위치의 정규화 값이다. 개별 gap progress는 로봇별 최고값을 갱신할 때만 지급하므로 좌우 왕복으로 반복 수집할 수 없다. anchor 벌점은 이번 step에 실제로 새로 연결된 앵커만 센다.
 
 보상에 앵커 파손 자체의 별도 항은 없다. 파손은 구조 용량 저하, 진행도 손실, 낙하와 최종 성공 실패를 통해 간접적으로 불리해진다. 또한 현재 local strain은 접촉·앵커 변형의 근사 센서이며, 종단 하중 시험의 응력이 보상 입력으로 직접 되돌아오지는 않는다.
 
@@ -164,7 +168,7 @@ L_{\pi}
 +c_{\mathrm{aux}}L_{\mathrm{aux}}.
 \]
 
-기본 \(c_H=0.01\), \(c_{\mathrm{aux}}=0.1\)이다. critic은
+기본 \(c_H=0.03\), \(c_{\mathrm{aux}}=0.1\)이다. 팀 GAE advantage에는 gap progress, energy, idle, anchor, 사용과 낙하를 로봇별로 할인 누적·정규화한 credit advantage를 기본 계수 0.5로 더한다. critic은
 
 \[
 L_V=\operatorname{MSE}(V_\phi(s_t),R_t)
@@ -180,12 +184,12 @@ L_V=\operatorname{MSE}(V_\phi(s_t),R_t)
 
 | 단계 | 변화 |
 | --- | --- |
-| 1 | 폭 3.0의 직선 간극, 고정 목표 하중 3.0, 결정적 센서·구동기 |
-| 2 | 간극 폭 [3, 5], 목표 하중 [3, 10], 초기 pose 무작위화 |
-| 3 | 간극 방향 jitter와 경계 불규칙성 추가 |
+| 1 | 전체 폭·방향·불규칙성 범위의 25% 안에서 무작위 지형, 고정 목표 하중 3.0 |
+| 2 | 지형 무작위화 범위 50%, 목표 하중 [3, 10] |
+| 3 | 지형 무작위화 범위 75% |
 | 4 | 마찰, 질량, 앵커 강도, 센서·구동기 잡음 무작위화 |
 
-4단계에서는 마찰과 앵커 한계를 [0.8, 1.2] 배율로, 질량은 [0.85, 1.15] 배율로 바꾼다. 센서와 actuator noise는 설정값보다 작지 않게 최소 0.01로 둔다.
+모든 단계와 실행 경로에서 로봇은 왼쪽 제방의 겹치지 않는 무작위 위치와 전 방향 무작위 heading으로 시작한다. 같은 seed는 같은 배치를 재현한다. 4단계에서는 지형 범위 100%와 함께 마찰과 앵커 한계를 [0.8, 1.2] 배율로, 질량은 [0.85, 1.15] 배율로 바꾼다. 센서와 actuator noise는 설정값보다 작지 않게 최소 0.01로 둔다.
 
 ## 10. 설정과 실행
 
@@ -226,8 +230,9 @@ output_dir의 episodes.jsonl에는 각 완료 에피소드의 다음 정보가 �
 - 사용·앵커 로봇 수와 에너지 proxy
 - 마지막 접촉 그래프와 morphology
 - action 분포와 사용 가능한 branch latent 통계
+- 누적 episode_reward와 항목별 reward_component_totals
 
-업데이트별 반환값에는 actor_loss, critic_loss, entropy, auxiliary_loss, curriculum_stage가 있다. 보상 항의 세부값은 각 환경 step의 info.reward_components에 들어가므로, 새로운 보상 항을 조정할 때는 이 값과 success·용량·낙하 지표를 함께 확인한다.
+업데이트별 반환값에는 actor_loss, critic_loss, entropy, auxiliary_loss, curriculum_stage가 있다. 각 step의 info에는 팀 reward_components와 로봇별 agent_rewards가 들어가므로, 새로운 보상 항을 조정할 때는 누적 항목과 success·용량·낙하 지표를 함께 확인한다.
 
 재현 실험에서는 config 파일, seed, update 수, device, checkpoint 경로를 함께 기록한다. 현재 Trainer는 단일 환경 rollout을 사용하며, CLI에 학습 재개 옵션은 없다. 장기 학습 재개가 필요하면 checkpoint의 optimizer 상태와 experiment config를 명시적으로 복원하는 실행 경로를 추가해야 한다.
 

@@ -76,15 +76,18 @@ class GapGenerator:
 
     def generate(self, rng: np.random.Generator, stage: int = 1) -> GapField:
         config = self.config
-        if stage <= 1:
-            gap_width = config.width_min
-            orientation = np.deg2rad(config.orientation_deg)
-            irregularity = 0.0
-        else:
-            gap_width = float(rng.uniform(config.width_min, config.width_max))
-            orientation_jitter = config.orientation_jitter_deg if stage >= 3 else 0.0
-            orientation = np.deg2rad(config.orientation_deg + rng.uniform(-orientation_jitter, orientation_jitter))
-            irregularity = config.irregularity if stage >= 3 else 0.0
+        difficulty = float(np.clip(stage, 1, 4)) / 4.0
+        width_max = config.width_min + difficulty * (config.width_max - config.width_min)
+        gap_width = (
+            float(rng.uniform(config.width_min, width_max))
+            if width_max > config.width_min
+            else config.width_min
+        )
+        orientation_jitter = difficulty * config.orientation_jitter_deg
+        orientation = np.deg2rad(
+            config.orientation_deg + rng.uniform(-orientation_jitter, orientation_jitter)
+        )
+        irregularity = float(rng.uniform(0.0, difficulty * config.irregularity))
         max_feasible = config.field_length * 0.45
         gap_width = min(gap_width, max_feasible)
         return GapField(
