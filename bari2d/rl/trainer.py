@@ -55,10 +55,30 @@ class Trainer:
         self.curriculum = CurriculumScheduler(config)
         self.output_dir = Path(config.training.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.start_update = 0
+
+    def load_checkpoint(self, path: str | Path) -> int:
+        """Restore trainable state and return the completed update number."""
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
+        if not isinstance(checkpoint, dict) or "algorithm" not in checkpoint or "update" not in checkpoint:
+            raise ValueError(f"Unsupported training checkpoint: {path}")
+        update = checkpoint["update"]
+        if not isinstance(update, int) or update < 0:
+            raise ValueError(f"Checkpoint update must be a non-negative integer: {path}")
+        algorithm_state = checkpoint["algorithm"]
+        if not isinstance(algorithm_state, dict):
+            raise ValueError(f"Checkpoint algorithm state must be a mapping: {path}")
+        self.algorithm.load_state_dict(algorithm_state)
+        self.start_update = update
+        return update
 
     def train(self, updates: int | None = None) -> list[dict[str, float]]:
         training = self.config.training
         update_count = updates if updates is not None else training.total_updates
+        if update_count <= self.start_update:
+            raise ValueError(
+                f"Requested final update ({update_count}) must exceed checkpoint update ({self.start_update})"
+            )
         observation, _ = self.env.reset()
         hidden = self.actor.initial_hidden(self.env.config.robot.count, self.device)
         episode_start = np.ones(self.env.config.robot.count, dtype=np.float32)
@@ -68,7 +88,7 @@ class Trainer:
         episode_reward = 0.0
         reward_component_totals: dict[str, float] = {}
         last_done = False
-        for update in range(1, update_count + 1):
+        for update in range(self.start_update + 1, update_count + 1):
             buffer = RolloutBuffer(
                 training.rollout_steps,
                 self.env.config.robot.count,

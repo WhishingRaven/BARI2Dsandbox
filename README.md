@@ -40,6 +40,15 @@ conda run -n bari2d python scripts/train.py \
   --updates 1000
 ```
 
+Resume a run from update 1,000 through update 2,000 (the checkpoint's saved
+configuration and optimizer state are used):
+
+```bash
+conda run -n bari2d python scripts/train.py \
+  --resume runs/baseline/checkpoint_001000.pt \
+  --updates 2000
+```
+
 Evaluate a checkpoint on stage-4 randomized gaps:
 
 ```bash

@@ -234,7 +234,12 @@ output_dir의 episodes.jsonl에는 각 완료 에피소드의 다음 정보가 �
 
 업데이트별 반환값에는 actor_loss, critic_loss, entropy, auxiliary_loss, curriculum_stage가 있다. 각 step의 info에는 팀 reward_components와 로봇별 agent_rewards가 들어가므로, 새로운 보상 항을 조정할 때는 누적 항목과 success·용량·낙하 지표를 함께 확인한다.
 
-재현 실험에서는 config 파일, seed, update 수, device, checkpoint 경로를 함께 기록한다. 현재 Trainer는 단일 환경 rollout을 사용하며, CLI에 학습 재개 옵션은 없다. 장기 학습 재개가 필요하면 checkpoint의 optimizer 상태와 experiment config를 명시적으로 복원하는 실행 경로를 추가해야 한다.
+재현 실험에서는 config 파일, seed, update 수, device, checkpoint 경로를 함께 기록한다. 중단한 학습은 다음처럼 재개한다.
+
+    conda run -n bari2d python scripts/train.py \
+      --resume runs/baseline/checkpoint_001000.pt --updates 2000
+
+`--updates`는 추가 횟수가 아니라 최종 update 번호다. 따라서 위 명령은 update 1001부터 2000까지 학습한다. 재개할 때는 checkpoint에 저장된 experiment config와 actor·critic optimizer 상태를 복원하며, `--config`는 사용하지 않는다.
 
 ## 12. 해석 시 주의점
 
