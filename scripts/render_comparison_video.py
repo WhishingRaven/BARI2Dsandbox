@@ -68,6 +68,15 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def latest_checkpoint(run: str) -> Path | None:
+    """Return the numerically latest checkpoint, if the run has one."""
+    run_directory = Path("runs") / run
+    checkpoints = sorted(run_directory.glob("checkpoint_*.pt"))
+    if not checkpoints:
+        return None
+    return max(checkpoints, key=lambda checkpoint: int(checkpoint.stem.rsplit("_", 1)[1]))
+
+
 def main() -> None:
     arguments = parse_arguments()
     np.random.seed(arguments.seed)
@@ -75,7 +84,10 @@ def main() -> None:
     device = resolved_device(arguments.device)
     sessions: list[tuple[str, InferenceSession]] = []
     for run in RUNS:
-        checkpoint = Path("runs") / run / "checkpoint_001000.pt"
+        checkpoint = latest_checkpoint(run)
+        if checkpoint is None:
+            print(f"Skipping {run}: no checkpoints found")
+            continue
         model = load_inference_model(checkpoint, None, device)
         sessions.append(
             (
@@ -90,9 +102,13 @@ def main() -> None:
                 ),
             )
         )
+    if not sessions:
+        raise FileNotFoundError("No checkpoints found in any configured run")
 
     figure, axes = plt.subplots(2, 4, figsize=(16, 9), dpi=120)
     figure.subplots_adjust(left=0.025, right=0.99, top=0.90, bottom=0.035, wspace=0.11, hspace=0.19)
+    for axis in axes.flat[len(sessions) :]:
+        axis.set_visible(False)
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     command = [
         "ffmpeg",
