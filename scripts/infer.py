@@ -158,6 +158,7 @@ class InferenceSession:
         self.preview_prediction: PolicyPrediction | None = None
         self.last_reward = 0.0
         self.done = False
+        self.reset_count = 0
         self.load(model, stage=stage, target_load=target_load)
 
     def load(
@@ -173,7 +174,8 @@ class InferenceSession:
     def reset(self, stage: int | None = None, target_load: float | None = None) -> None:
         if stage is not None:
             self.env.config.curriculum_stage = int(np.clip(stage, 1, 4))
-        self.observation, self.info = self.env.reset(seed=self.seed)
+        self.observation, self.info = self.env.reset(seed=self.seed + self.reset_count)
+        self.reset_count += 1
         if target_load is not None:
             self.set_target_load(target_load, refresh=False)
         self.hidden = self.model.actor.initial_hidden(self.env.config.robot.count, self.device)
@@ -472,7 +474,10 @@ class InferenceViewer:
             info_lines.extend(latent_lines)
             self.info_axis.text(0.0, 1.0, "\n".join(info_lines), va="top", fontsize=9)
         self.info_axis.axis("off")
-        self.figure.canvas.draw_idle()
+        # Timer callbacks need to present the completed frame immediately.
+        # Some interactive backends coalesce repeated draw_idle() requests,
+        # leaving the initial frame visible while the session advances.
+        self.figure.canvas.draw()
 
     def save(self, output: Path) -> None:
         self.refresh()
@@ -501,7 +506,20 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--stage", type=int, choices=range(1, 5))
     parser.add_argument("--target-load", type=float)
     parser.add_argument("--interval-ms", type=int, default=150)
-    parser.add_argument("--stochastic", action="store_true", help="Sample actions instead of choosing the policy argmax.")
+    policy_mode = parser.add_mutually_exclusive_group()
+    policy_mode.add_argument(
+        "--stochastic",
+        dest="deterministic",
+        action="store_false",
+        help="Sample actions from the learned policy distribution (default).",
+    )
+    policy_mode.add_argument(
+        "--deterministic",
+        dest="deterministic",
+        action="store_true",
+        help="Choose policy argmax actions; mode-collapsed checkpoints may remain idle.",
+    )
+    parser.set_defaults(deterministic=False)
     parser.add_argument("--no-show", action="store_true", help="Render a static PNG instead of opening the interactive viewer.")
     parser.add_argument("--steps", type=int, default=0, help="Inference steps before --no-show rendering.")
     parser.add_argument("--output", type=Path, default=Path("inference.png"))
@@ -510,6 +528,8 @@ def parse_arguments() -> argparse.Namespace:
 
 def main() -> None:
     arguments = parse_arguments()
+    np.random.seed(arguments.seed)
+    torch.manual_seed(arguments.seed)
     checkpoints = discover_checkpoints(arguments.checkpoint, arguments.models_dir)
     if not checkpoints:
         raise SystemExit(
@@ -522,7 +542,7 @@ def main() -> None:
         arguments.seed,
         arguments.stage,
         arguments.target_load,
-        deterministic=not arguments.stochastic,
+        deterministic=arguments.deterministic,
         interval_ms=arguments.interval_ms,
     )
     if arguments.no_show:
