@@ -101,7 +101,15 @@ class RewardConfig:
     # ``frontier`` - farthest robot front end among robots supported from the
     #                left bank (load-bearing structure under static physics), so a
     #                robot gripping the edge or walking out on the chain already counts.
+    # ``anchored_frontier`` - like ``frontier`` but only for robots held by a
+    #                structure that grips the left bank (bank anchor, then anchors
+    #                and robots standing on it); a robot merely nosing over the
+    #                edge earns nothing until it grips.
     progress_measure: str = "center"
+    # For the frontier measures, progress starts counting this far behind the
+    # left cliff edge (0 = at the edge), so a grip close to the edge already
+    # earns part of the span reward and a closer grip earns more.
+    progress_baseline: float = 0.0
 
 
 @dataclass
@@ -147,6 +155,9 @@ class EnvironmentConfig:
     time_step: float = 0.1
     curriculum_stage: int = 1
     seed: int = 0
+    # Per curriculum stage, the farthest a robot center may start from the
+    # left cliff edge (the last value is reused; <= 0 means anywhere on the bank).
+    spawn_edge_distance: list[float] = field(default_factory=list)
     actuator_noise: float = 0.0
     latent_sigma: float = 0.0
     latent_dim: int = 4

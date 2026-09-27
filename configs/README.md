@@ -16,6 +16,7 @@
 | beacon_structured_mappo_v2.yaml | structured_mappo | graph | 비콘 통신과 커리큘럼 (legacy 물리) |
 | beacon_structured_mappo_static.yaml | structured_mappo | graph | v2와 같은 설정에 중력·정적 평형 물리 |
 | beacon_structured_mappo_static_v2.yaml | structured_mappo | graph | static + 로봇 10대, 400스텝, frontier 진행도, 낮춘 벌점 |
+| beacon_structured_mappo_static_v3.yaml | structured_mappo | graph | static + 로봇 5대, 가장자리 근처 출발, 둑을 잡은 구조물만 진행도, 엔트로피 0.01 |
 
 기본 Structured MAPPO를 학습한다.
 

@@ -209,13 +209,19 @@ class BridgeEnv:
         margin = 0.5 * np.hypot(robot_config.length, robot_config.width) + 1.0e-3
         low = np.array([margin, margin], dtype=float)
         high = np.array([self.field.length - margin, self.field.width - margin], dtype=float)
-        attempts = max(2_000, self.config.robot.count * 250)
+        edge_limit = self._spawn_edge_limit()
+        attempts = max(2_000, self.config.robot.count * 250) * (10 if edge_limit > 0.0 else 1)
         for _ in range(attempts):
             position = self.rng.uniform(low, high)
             theta = float(self.rng.uniform(-np.pi, np.pi))
             candidate = RobotState(robot_id, position.astype(float), theta)
             if any(self.field.bank_at(corner) != LEFT_BANK for corner in candidate.corners(robot_config)):
                 continue
+            if edge_limit > 0.0:
+                longitudinal, tangent = self.field.coordinates(position)
+                left_boundary, _ = self.field.boundaries(tangent)
+                if left_boundary - longitudinal > edge_limit:
+                    continue
             if any(oriented_boxes_overlap(candidate, other, robot_config) for other in existing):
                 continue
             return candidate
@@ -460,20 +466,53 @@ class BridgeEnv:
         measure = self.config.reward.progress_measure
         if measure == "center":
             return self.graph.spanning_progress(self.robots, self.field)
-        if measure != "frontier":
-            raise ValueError(f"Unknown progress measure: {measure}")
-        if self.static_physics:
-            supported = self._static_structure().reachable_from(LEFT_BANK)
+        if measure == "frontier":
+            if self.static_physics:
+                supported = self._static_structure().reachable_from(LEFT_BANK)
+            else:
+                supported = {node for node in self.graph.connected_component(LEFT_BANK) if isinstance(node, int)}
+        elif measure == "anchored_frontier":
+            if self.static_physics:
+                supported = self._static_structure().anchored_from(LEFT_BANK)
+            else:
+                supported = self._anchored_component(LEFT_BANK)
         else:
-            supported = {node for node in self.graph.connected_component(LEFT_BANK) if isinstance(node, int)}
+            raise ValueError(f"Unknown progress measure: {measure}")
+        baseline = max(self.config.reward.progress_baseline, 0.0)
         reach = 0.0
         for robot_id in supported:
             robot = self.robots[robot_id]
             if robot.fallen:
                 continue
             for corner in robot.corners(self.config.robot):
-                reach = max(reach, self.field.normalized_progress(corner))
+                longitudinal, tangent = self.field.coordinates(corner)
+                left, right = self.field.boundaries(tangent)
+                start = left - baseline
+                reach = max(reach, float(np.clip((longitudinal - start) / max(right - start, 1.0e-6), 0.0, 1.0)))
         return reach
+
+    def _anchored_component(self, bank: str) -> set[int]:
+        """Legacy-physics counterpart of StaticStructure.anchored_from: anchor edges only."""
+        reached: set[int] = set()
+        frontier: list[int | str] = [bank]
+        visited: set[int | str] = {bank}
+        while frontier:
+            node = frontier.pop()
+            for edge in self.graph.edges.values():
+                if edge.kind != "anchor" or node not in (edge.source, edge.target):
+                    continue
+                other = edge.target if edge.source == node else edge.source
+                if other not in visited and isinstance(other, int):
+                    visited.add(other)
+                    reached.add(other)
+                    frontier.append(other)
+        return reached
+
+    def _spawn_edge_limit(self) -> float:
+        distances = self.config.spawn_edge_distance
+        if not distances:
+            return 0.0
+        return float(distances[min(max(self.config.curriculum_stage - 1, 0), len(distances) - 1)])
 
     def _robot_weight(self) -> float:
         mass = self._episode_randomization.get("robot_mass", self.config.robot.mass)

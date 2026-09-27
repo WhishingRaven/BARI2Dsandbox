@@ -235,6 +235,26 @@ class StaticStructure:
                     frontier.append(neighbor)
         return {node for node in reached if isinstance(node, int)}
 
+    def anchored_from(self, bank: str) -> set[int]:
+        """Bodies held by a structure that grips ``bank``.
+
+        Starts from robots anchored to the bank, then follows robot-robot anchors
+        (both ways) and support patches upward (robots standing on a held body).
+        Robots merely resting on the bank do not count.
+        """
+        reached = {joint.owner for joint in self.joints if joint.partner == bank and joint.owner in self.bodies}
+        frontier = list(reached)
+        while frontier:
+            node = frontier.pop()
+            neighbors = [joint.partner for joint in self.joints if joint.owner == node]
+            neighbors += [joint.owner for joint in self.joints if joint.partner == node]
+            neighbors += [patch.upper for patch in self.patches if patch.lower == node]
+            for neighbor in neighbors:
+                if isinstance(neighbor, int) and neighbor in self.bodies and neighbor not in reached:
+                    reached.add(neighbor)
+                    frontier.append(neighbor)
+        return reached
+
     def banks_reached(self, component: set[int]) -> set[str]:
         banks = {patch.lower for patch in self.patches if patch.upper in component and isinstance(patch.lower, str)}
         banks |= {joint.partner for joint in self.joints if joint.owner in component and isinstance(joint.partner, str)}
