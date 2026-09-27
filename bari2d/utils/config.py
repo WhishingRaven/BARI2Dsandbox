@@ -96,6 +96,12 @@ class RewardConfig:
     # robot has remained idle longer than the grace period.
     idle_penalty: float = 0.0
     idle_grace_steps: int = 5
+    # How span progress (the ``span`` reward potential) is measured:
+    # ``center``   - farthest robot center connected to the left bank (original);
+    # ``frontier`` - farthest robot front end among robots supported from the
+    #                left bank (load-bearing structure under static physics), so a
+    #                robot gripping the edge or walking out on the chain already counts.
+    progress_measure: str = "center"
 
 
 @dataclass
@@ -105,6 +111,34 @@ class BeaconConfig:
     enabled: bool = False
     communication_range: float = 2.5
     max_hops: int = 4
+
+
+@dataclass
+class PhysicsConfig:
+    """Structural model selection.
+
+    ``legacy`` keeps the original BARI graph-flow physics unchanged.  ``static``
+    adds gravity and rigid-body equilibrium (bari2d/env/statics.py): a robot
+    whose weight is not supported tips over, plain side contact carries no
+    weight, anchors carry vertical force and bending/torsion couples up to the
+    limits below, and load capacity is the largest equilibrium load.  Forces are
+    in robot weights (mass * gravity) and moments in weight * length units.
+    """
+
+    model: str = "legacy"
+    gravity: float = 1.0
+    # Vertical shear capacity of an anchor; ``None`` reuses contact.anchor_shear_limit.
+    anchor_vertical_limit: float | None = None
+    anchor_bending_limit: float = 5.0
+    anchor_torsion_limit: float = 5.0
+    # Gripping while standing on the front half of an aligned robot steps off
+    # its front end and attaches end-to-end (walk over the bridge, extend it).
+    extend_on_anchor: bool = True
+    extend_alignment: float = 0.8
+    # Robots up to this layer also rest on the ground where their footprint is
+    # over a bank.  Layer 1 covers the tilted climbing pose (rear wheels on the
+    # ground, front on another robot) that the 2.5D layers cannot draw.
+    ground_contact_max_layer: int = 1
 
 
 @dataclass
@@ -123,6 +157,7 @@ class EnvironmentConfig:
     load: LoadConfig = field(default_factory=LoadConfig)
     reward: RewardConfig = field(default_factory=RewardConfig)
     beacon: BeaconConfig = field(default_factory=BeaconConfig)
+    physics: PhysicsConfig = field(default_factory=PhysicsConfig)
 
 
 @dataclass
@@ -156,6 +191,9 @@ class TrainingConfig:
     curriculum_window: int = 25
     curriculum_success_threshold: float = 0.7
     curriculum_max_stage: int = 4
+    # A time-limit cut is not a real ending: add gamma * V(final state) to the
+    # last reward instead of treating the cut as terminal in GAE.
+    bootstrap_truncation: bool = True
 
 
 @dataclass

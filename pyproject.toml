@@ -12,6 +12,7 @@ dependencies = [
   "numpy>=1.26",
   "torch>=2.2",
   "PyYAML>=6.0",
+  "scipy>=1.11",
   "matplotlib>=3.8",
 ]
 

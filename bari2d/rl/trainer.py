@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -91,6 +92,8 @@ class Trainer:
         history: list[dict[str, float]] = []
         episode_number = 0
         last_done = False
+        episode_return = 0.0
+        episode_components: dict[str, float] = {}
         for update in range(self.completed_updates + 1, target_update + 1):
             buffer = RolloutBuffer(
                 training.rollout_steps,
@@ -124,6 +127,12 @@ class Trainer:
                 policy_statistics.add(action_values, output.latents)
                 next_observation, reward, terminated, truncated, info = self.env.step(action_values)
                 done = terminated or truncated
+                episode_return += float(reward)
+                stored_reward = float(reward)
+                if truncated and not terminated and training.bootstrap_truncation:
+                    stored_reward += training.gamma * self._state_value()
+                for name, component in info.get("reward_components", {}).items():
+                    episode_components[name] = episode_components.get(name, 0.0) + float(component)
                 buffer.add(
                     observation,
                     global_state,
@@ -131,7 +140,7 @@ class Trainer:
                     log_probabilities.cpu().numpy(),
                     action_masks,
                     episode_start,
-                    reward,
+                    stored_reward,
                     float(value.cpu()),
                     done,
                     info["auxiliary_targets"],
@@ -145,6 +154,9 @@ class Trainer:
                     episode_log: dict[str, Any] = dict(info)
                     episode_log.update(policy_statistics.summarize())
                     episode_log.update(episode=episode_number, update=update, curriculum_stage=self.env.config.curriculum_stage)
+                    episode_log.update(episode_return=episode_return, episode_reward_components=episode_components)
+                    episode_return = 0.0
+                    episode_components = {}
                     advanced = self.curriculum.record(bool(info["success"]), self.env)
                     episode_log["curriculum_advanced"] = advanced
                     self.logger.log(episode_log)
@@ -152,25 +164,14 @@ class Trainer:
                     hidden = self.actor.initial_hidden(self.env.config.robot.count, self.device)
                     episode_start = np.ones(self.env.config.robot.count, dtype=np.float32)
                     policy_statistics = PolicyStatistics(self.env.action_count)
-            with torch.no_grad():
-                if last_done:
-                    last_value = 0.0
-                elif isinstance(self.critic, GraphCritic):
-                    graph_tensors = tuple(
-                        torch.as_tensor(item, device=self.device) for item in self.env.dense_graph_state()
-                    )
-                    last_value = float(
-                        self.algorithm.value(torch.as_tensor(self.env.global_state(), device=self.device), graph_tensors).cpu()
-                    )
-                else:
-                    last_value = float(
-                        self.algorithm.value(torch.as_tensor(self.env.global_state(), device=self.device)).cpu()
-                    )
+            last_value = 0.0 if last_done else self._state_value()
             buffer.compute_returns(last_value, training.gamma, training.gae_lambda)
             metrics = self.algorithm.update(buffer.as_tensors(self.device))
             metrics["update"] = float(update)
             metrics["curriculum_stage"] = float(self.env.config.curriculum_stage)
             history.append(metrics)
+            with (self.output_dir / "updates.jsonl").open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(metrics) + "\n")
             print(
                 f"Update {update}/{target_update} "
                 f"actor_loss={metrics['actor_loss']:.4f} "
@@ -182,6 +183,15 @@ class Trainer:
                 self.save_checkpoint(update)
         self.completed_updates = target_update
         return history
+
+    def _state_value(self) -> float:
+        """Critic value of the environment's current (centralized) state."""
+        with torch.no_grad():
+            global_state = torch.as_tensor(self.env.global_state(), device=self.device)
+            if isinstance(self.critic, GraphCritic):
+                graph_tensors = tuple(torch.as_tensor(item, device=self.device) for item in self.env.dense_graph_state())
+                return float(self.algorithm.value(global_state, graph_tensors).cpu())
+            return float(self.algorithm.value(global_state).cpu())
 
     def save_checkpoint(self, update: int) -> Path:
         path = self.output_dir / f"checkpoint_{update:06d}.pt"

@@ -13,6 +13,9 @@
 | structured_mappo.yaml | structured_mappo | graph | BARI_26 기본 네 분기 Structured MAPPO |
 | bio_heterogeneity.yaml | bio_heterogeneity | graph | bio_film과 개체별 latent의 차이 |
 | curriculum.yaml | gru | mlp | 난이도 무작위화가 켜진 기준선 |
+| beacon_structured_mappo_v2.yaml | structured_mappo | graph | 비콘 통신과 커리큘럼 (legacy 물리) |
+| beacon_structured_mappo_static.yaml | structured_mappo | graph | v2와 같은 설정에 중력·정적 평형 물리 |
+| beacon_structured_mappo_static_v2.yaml | structured_mappo | graph | static + 로봇 10대, 400스텝, frontier 진행도, 낮춘 벌점 |
 
 기본 Structured MAPPO를 학습한다.
 

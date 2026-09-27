@@ -1,0 +1,69 @@
+# Static physics, tuned so learning gets a signal from the first correct step.
+# Changes from beacon_structured_mappo_static.yaml (which stalled at zero
+# progress: the policy learned to avoid the cliff and stopped anchoring):
+#   - 10 robots and 400-step episodes: one episode per update, ~4x faster steps.
+#   - progress_measure: frontier - span reward follows the front end of the
+#     structure supported from the left bank, so gripping the edge and walking
+#     out on the chain are rewarded before the first full extension.
+#   - anchor_penalty 0.05 -> 0.01 and collapse_penalty 2.0 -> 0.5 so trying the
+#     edge is not dominated by penalties early on.
+#   - bootstrap_truncation: time-limit cuts are bootstrapped, not terminal.
+environment:
+  seed: 7
+  curriculum_stage: 1
+  max_steps: 400
+  latent_sigma: 0.0
+  robot:
+    count: 10
+  gap:
+    width_min: 1.2
+    width_max: 3.0
+    curriculum_widths: [1.2, 1.7, 2.3, 3.0]
+  load:
+    target_min: 1.0
+    target_max: 3.0
+    curriculum_targets: [1.0, 1.5, 2.2, 3.0]
+  contact:
+    anchor_requires_edge_or_contact: true
+    anchor_edge_band: 1.2
+  physics:
+    model: static
+    gravity: 1.0
+    anchor_bending_limit: 5.0
+    anchor_torsion_limit: 5.0
+    extend_on_anchor: true
+    ground_contact_max_layer: 1
+  beacon:
+    enabled: true
+    communication_range: 2.5
+    max_hops: 4
+  reward:
+    progress_measure: frontier
+    span_delta: 4.0
+    mechanical_delta: 3.0
+    time_penalty: 0.002
+    energy_penalty: 0.002
+    anchor_penalty: 0.01
+    robot_use_penalty: 0.002
+    collapse_penalty: 0.5
+    success_reward: 30.0
+    beacon_discovery_reward: 0.5
+    beacon_gather_delta: 0.5
+    idle_penalty: 0.0005
+    idle_grace_steps: 5
+model:
+  architecture: structured_mappo
+  branch_hidden: 48
+  fused_hidden: 64
+  recurrent_hidden: 64
+  film: true
+  use_heterogeneity: false
+training:
+  total_updates: 1000
+  rollout_steps: 400
+  learning_rate: 0.0003
+  entropy_coef: 0.04
+  auxiliary_coef: 0.1
+  critic: graph
+  bootstrap_truncation: true
+  output_dir: runs/beacon_structured_mappo_static_v2

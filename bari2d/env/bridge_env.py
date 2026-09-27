@@ -11,6 +11,8 @@ from bari2d.env.field import LEFT_BANK, RIGHT_BANK, GapField, GapGenerator
 from bari2d.env.load_evaluator import FastLoadEvaluator, IncrementalLoadEvaluator, LoadTestResult
 from bari2d.env.robot import ACTION_COUNT, DiscreteAction, RobotState
 from bari2d.env.sensors import cliff_sensor_direction, ir_distances, ir_ray_count
+from bari2d.env.static_physics import PHYSICS_MODELS, StaticContactModel, build_structure
+from bari2d.env.statics import max_load, stabilize
 from bari2d.utils.config import BEACON_FEATURE_SIZE, EnvironmentConfig
 
 
@@ -62,7 +64,16 @@ class BridgeEnv:
         self.layout = make_observation_layout(self.config)
         self.rng = np.random.default_rng(self.config.seed)
         self.gap_generator = GapGenerator(self.config.gap)
-        self.contact_model = ContactModel(deepcopy(self.config.contact), self.config.robot)
+        if self.config.physics.model not in PHYSICS_MODELS:
+            raise ValueError(f"Unknown physics model: {self.config.physics.model}")
+        self.static_physics = self.config.physics.model == "static"
+        if self.static_physics:
+            self.contact_model: ContactModel = StaticContactModel(
+                deepcopy(self.config.contact), self.config.robot, self.config.physics
+            )
+        else:
+            self.contact_model = ContactModel(deepcopy(self.config.contact), self.config.robot)
+        self._static_spans = False
         self.fast_evaluator = FastLoadEvaluator()
         self.accurate_evaluator = IncrementalLoadEvaluator(self.config.load)
         self.field: GapField
@@ -117,8 +128,8 @@ class BridgeEnv:
         self.graph = self.contact_model.build_graph(self.robots, self.field, self.rng)
         self.step_count = 0
         self.phase = "construction"
-        self.current_capacity = self.fast_evaluator.evaluate(self.graph, self.config.load).capacity
-        self.current_progress = self.graph.spanning_progress(self.robots, self.field)
+        self.current_capacity = self._evaluate_load().capacity
+        self.current_progress = self._structure_progress()
         self.max_progress = self.current_progress
         self.last_load_test = None
         self._episode_success = False
@@ -227,8 +238,8 @@ class BridgeEnv:
                 raise ValueError(f"Robot {robot.robot_id} latent must have shape {(self.config.latent_dim,)}")
         self.robots = states
         self.graph = self.contact_model.build_graph(self.robots, self.field, self.rng)
-        self.current_progress = self.graph.spanning_progress(self.robots, self.field)
-        self.current_capacity = self.fast_evaluator.evaluate(self.graph, self.config.load).capacity
+        self.current_progress = self._structure_progress()
+        self.current_capacity = self._evaluate_load().capacity
 
     def action_masks(self) -> np.ndarray:
         masks = np.ones((len(self.robots), ACTION_COUNT), dtype=bool)
@@ -359,11 +370,11 @@ class BridgeEnv:
         self._auto_descend_unsupported()
         self.graph = self.contact_model.build_graph(self.robots, self.field, self.rng)
         self._mark_fallen_robots()
-        if sum(robot.fallen for robot in self.robots) > old_fallen:
+        if not self.static_physics and sum(robot.fallen for robot in self.robots) > old_fallen:
             self.graph = self.contact_model.build_graph(self.robots, self.field, self.rng)
-        self.current_progress = self.graph.spanning_progress(self.robots, self.field)
+        self.current_progress = self._structure_progress()
         self.max_progress = max(self.max_progress, self.current_progress)
-        fast_result = self.fast_evaluator.evaluate(self.graph, self.config.load)
+        fast_result = self._evaluate_load()
         self.current_capacity = fast_result.capacity
         self.step_count += 1
         self._update_histories()
@@ -372,12 +383,12 @@ class BridgeEnv:
         accurate_capacity: float | None = None
         success = False
         time_limit = self.step_count >= self.config.max_steps
-        if (self.graph.spans and self.current_capacity >= self.target_load) or time_limit:
+        if (self._structure_spans() and self.current_capacity >= self.target_load) or time_limit:
             self.phase = "load_test"
-            self.last_load_test = self.accurate_evaluator.evaluate(self.graph)
+            self.last_load_test = self._evaluate_load(accurate=True)
             accurate_capacity = self.last_load_test.capacity
             self.current_capacity = accurate_capacity
-            success = self.graph.spans and accurate_capacity >= self.target_load
+            success = self._structure_spans() and accurate_capacity >= self.target_load
             self.phase = "complete" if success or time_limit else "construction"
 
         terminated = success
@@ -440,7 +451,99 @@ class BridgeEnv:
         robot.position[0] = float(np.clip(robot.position[0], margin_x, self.field.length - margin_x))
         robot.position[1] = float(np.clip(robot.position[1], margin_y, self.field.width - margin_y))
 
+    def _structure_spans(self) -> bool:
+        """Bank-to-bank connection that can carry load under the active physics model."""
+        return self._static_spans if self.static_physics else self.graph.spans
+
+    def _structure_progress(self) -> float:
+        """Span progress in [0, 1] used by the ``span`` reward (see reward.progress_measure)."""
+        measure = self.config.reward.progress_measure
+        if measure == "center":
+            return self.graph.spanning_progress(self.robots, self.field)
+        if measure != "frontier":
+            raise ValueError(f"Unknown progress measure: {measure}")
+        if self.static_physics:
+            supported = self._static_structure().reachable_from(LEFT_BANK)
+        else:
+            supported = {node for node in self.graph.connected_component(LEFT_BANK) if isinstance(node, int)}
+        reach = 0.0
+        for robot_id in supported:
+            robot = self.robots[robot_id]
+            if robot.fallen:
+                continue
+            for corner in robot.corners(self.config.robot):
+                reach = max(reach, self.field.normalized_progress(corner))
+        return reach
+
+    def _robot_weight(self) -> float:
+        mass = self._episode_randomization.get("robot_mass", self.config.robot.mass)
+        return float(mass) * self.config.physics.gravity
+
+    def _static_structure(self):
+        return build_structure(
+            self.robots,
+            self.field,
+            self.contact_model,
+            self.config.robot,
+            self.config.physics,
+            self._robot_weight(),
+            float(self._episode_randomization.get("anchor_strength_scale", 1.0)),
+        )
+
+    def _evaluate_load(self, accurate: bool = False) -> LoadTestResult:
+        if not self.static_physics:
+            if accurate:
+                return self.accurate_evaluator.evaluate(self.graph)
+            return self.fast_evaluator.evaluate(self.graph, self.config.load)
+        outcome = max_load(self._static_structure(), self.config.load.load_protocol, self.config.load.max_target)
+        self._static_spans = outcome.spans
+        return LoadTestResult(
+            outcome.capacity,
+            outcome.failure_mode,
+            [(owner, partner) for owner, partner in outcome.critical_joints],
+            outcome.load_path,
+            0.0,
+            self.config.load.load_protocol,
+        )
+
+    def _stabilize_static(self) -> None:
+        """Break overloaded anchors and drop robots whose weight is not supported."""
+        outcome = stabilize(self._static_structure())
+        changed = False
+        overloaded = set(outcome.broken_joints)
+        for owner, partner in outcome.broken_joints + outcome.released_joints:
+            anchor = self.contact_model.anchors.get(owner)
+            if anchor is None or anchor.partner != partner:
+                continue
+            self.contact_model.release(self.robots[owner])
+            if (owner, partner) in overloaded:
+                self.contact_model.anchor_failures += 1
+            changed = True
+        for robot_id in outcome.unsupported:
+            robot = self.robots[robot_id]
+            self.contact_model.release(robot)
+            if robot.layer > 0 and self.field.bank_at(robot.position) is not None:
+                robot.layer = 0  # tipped off a lower robot onto the ground
+            else:
+                robot.fallen = True
+                robot.velocity = 0.0
+            changed = True
+        for owner_id, anchor in list(self.contact_model.anchors.items()):
+            if isinstance(anchor.partner, int) and self.robots[anchor.partner].fallen:
+                self.contact_model.release(self.robots[owner_id])
+                changed = True
+        if changed:
+            self.graph = self.contact_model.build_graph(self.robots, self.field, self.rng)
+        strain_scale = max(self.contact_model.anchor_capacity, self.config.contact.contact_capacity, 1.0)
+        for robot_id, utilisation in outcome.utilisation.items():
+            robot = self.robots[robot_id]
+            if not robot.fallen:
+                robot.strain += strain_scale * utilisation
+
     def _mark_fallen_robots(self) -> None:
+        if self.static_physics:
+            self._stabilize_static()
+            return
         supported = self.graph.connected_component(LEFT_BANK) | self.graph.connected_component(RIGHT_BANK)
         for robot in self.robots:
             if robot.fallen or robot.robot_id in supported:
@@ -702,7 +805,7 @@ class BridgeEnv:
             "target_load": self.target_load,
             "capacity": self.current_capacity,
             "capacity_ratio": self.current_capacity / max(self.target_load, 1.0e-9),
-            "span": self.graph.spans,
+            "span": self._structure_spans(),
             "span_progress": self.current_progress,
             "max_span_progress": self.max_progress,
             "anchored_robots": sum(robot.anchored for robot in self.robots),

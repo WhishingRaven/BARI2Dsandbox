@@ -1,0 +1,60 @@
+# beacon_structured_mappo_v2 with gravity and rigid-body equilibrium physics.
+# Robots tip when their weight is unsupported, side contact carries no weight,
+# anchors carry vertical force and bending/torsion couples up to their limits,
+# and capacity is the largest equilibrium load (in robot weights).  Robots on
+# top of the chain grip-and-extend it at its tip (see docs/simulation.md).
+environment:
+  seed: 7
+  curriculum_stage: 1
+  max_steps: 1000
+  latent_sigma: 0.0
+  gap:
+    width_min: 1.2
+    width_max: 3.0
+    curriculum_widths: [1.2, 1.7, 2.3, 3.0]
+  load:
+    target_min: 1.0
+    target_max: 3.0
+    curriculum_targets: [1.0, 1.5, 2.2, 3.0]
+  contact:
+    anchor_requires_edge_or_contact: true
+    anchor_edge_band: 1.2
+  physics:
+    model: static
+    gravity: 1.0
+    anchor_bending_limit: 5.0
+    anchor_torsion_limit: 5.0
+    extend_on_anchor: true
+    ground_contact_max_layer: 1
+  beacon:
+    enabled: true
+    communication_range: 2.5
+    max_hops: 4
+  reward:
+    span_delta: 4.0
+    mechanical_delta: 3.0
+    time_penalty: 0.002
+    energy_penalty: 0.002
+    anchor_penalty: 0.05
+    robot_use_penalty: 0.002
+    collapse_penalty: 2.0
+    success_reward: 30.0
+    beacon_discovery_reward: 0.5
+    beacon_gather_delta: 0.5
+    idle_penalty: 0.0005
+    idle_grace_steps: 5
+model:
+  architecture: structured_mappo
+  branch_hidden: 48
+  fused_hidden: 64
+  recurrent_hidden: 64
+  film: true
+  use_heterogeneity: false
+training:
+  total_updates: 1000
+  rollout_steps: 400
+  learning_rate: 0.0003
+  entropy_coef: 0.04
+  auxiliary_coef: 0.1
+  critic: graph
+  output_dir: runs/beacon_structured_mappo_static
