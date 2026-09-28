@@ -54,9 +54,14 @@ ACTION_SHORT_LABELS = {
 }
 
 
+def max_curriculum_stage(config) -> int:
+    """Highest stage a config defines (per-stage lists may add stages beyond 4)."""
+    return max(4, len(config.gap.curriculum_widths), len(config.load.curriculum_targets), len(config.start_setups))
+
+
 def configure_plot_fonts() -> None:
     """Prefer a locally installed Korean-capable font without adding a dependency."""
-    for family in ("Apple SD Gothic Neo", "AppleGothic", "Noto Sans CJK KR", "NanumGothic"):
+    for family in ("Malgun Gothic", "Apple SD Gothic Neo", "AppleGothic", "Noto Sans CJK KR", "NanumGothic"):
         try:
             font_manager.findfont(family, fallback_to_default=False)
         except ValueError:
@@ -172,7 +177,7 @@ class InferenceSession:
 
     def reset(self, stage: int | None = None, target_load: float | None = None) -> None:
         if stage is not None:
-            self.env.config.curriculum_stage = int(np.clip(stage, 1, 4))
+            self.env.config.curriculum_stage = int(np.clip(stage, 1, max_curriculum_stage(self.env.config)))
         self.observation, self.info = self.env.reset(seed=self.seed)
         if target_load is not None:
             self.set_target_load(target_load, refresh=False)
@@ -303,7 +308,10 @@ class InferenceViewer:
             load_settings.max_target,
             valinit=self.session.env.target_load,
         )
-        self.stage_slider = Slider(self.stage_axis, "stage", 1, 4, valinit=self.session.env.config.curriculum_stage, valstep=1)
+        self.stage_slider = Slider(
+            self.stage_axis, "stage", 1, max_curriculum_stage(self.session.env.config),
+            valinit=self.session.env.config.curriculum_stage, valstep=1,
+        )
         self.play_button = Button(self.play_axis, "재생")
         self.step_button = Button(self.step_axis, "1 step")
         self.reset_button = Button(self.reset_axis, "재설정")
@@ -498,7 +506,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, default=Path("configs/baseline.yaml"), help="Fallback config for legacy checkpoints.")
     parser.add_argument("--device", default="mps" if torch.backends.mps.is_available() else "cpu")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--stage", type=int, choices=range(1, 5))
+    parser.add_argument("--stage", type=int, help="Curriculum stage (1-4, or more when the config lists more stages).")
     parser.add_argument("--target-load", type=float)
     parser.add_argument("--interval-ms", type=int, default=150)
     parser.add_argument("--stochastic", action="store_true", help="Sample actions instead of choosing the policy argmax.")

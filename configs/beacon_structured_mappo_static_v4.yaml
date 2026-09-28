@@ -1,0 +1,85 @@
+# Static physics with a start-state (reverse) curriculum so the late
+# construction steps are learned first.  v3 learned to grip the bank at the
+# cliff edge within ~7 steps but never climbed onto the gripping robot to
+# extend the bridge in 1000 updates (0 successes, stuck in stage 1).
+#
+# Curriculum (advance at 70% success over 25 episodes):
+#   stage 1  gap 1.2  robot 0 grips the edge, robot 1 stands on its rear half
+#            -> walk forward and grip-and-extend (one extension succeeds)
+#   stage 2  gap 1.2  robot 1 waits right behind the gripping robot -> CLIMB
+#   stage 3  gap 1.2  only robot 0 is prepared
+#   stage 4  gap 1.2  nothing prepared (the v3 task)
+#   stage 5  gap 1.7, stage 6  gap 2.3, stage 7  gap 3.0 (+ domain randomization)
+# The prepared starts are a training scaffold; report results from stages >= 4.
+#
+# Also new: two local contact cues in each observation (robot ahead is
+# anchored / robot beneath is anchored) and a small potential reward for
+# standing on an anchored robot (given back on stepping down).
+environment:
+  seed: 7
+  curriculum_stage: 1
+  max_steps: 400
+  latent_sigma: 0.0
+  start_setups: [walker_on_root, walker_behind_root, root_only, none, none, none, none]
+  spawn_edge_distance: [2.5, 2.5, 2.5, 2.5, 3.5, 5.0, 0.0]
+  randomization_stage: 7
+  robot:
+    count: 5
+  sensor:
+    structure_cues: true
+  gap:
+    width_min: 1.2
+    width_max: 3.0
+    curriculum_widths: [1.2, 1.2, 1.2, 1.2, 1.7, 2.3, 3.0]
+  load:
+    target_min: 1.0
+    target_max: 3.0
+    curriculum_targets: [1.0, 1.0, 1.0, 1.0, 1.5, 2.2, 3.0]
+  contact:
+    anchor_requires_edge_or_contact: true
+    anchor_edge_band: 1.2
+  physics:
+    model: static
+    gravity: 1.0
+    anchor_bending_limit: 5.0
+    anchor_torsion_limit: 5.0
+    extend_on_anchor: true
+    ground_contact_max_layer: 1
+  beacon:
+    enabled: true
+    communication_range: 2.5
+    max_hops: 4
+  reward:
+    progress_measure: anchored_frontier
+    progress_baseline: 0.9
+    climb_delta: 0.8
+    climb_cap: 1
+    span_delta: 4.0
+    mechanical_delta: 3.0
+    time_penalty: 0.002
+    energy_penalty: 0.002
+    anchor_penalty: 0.01
+    robot_use_penalty: 0.002
+    collapse_penalty: 0.5
+    success_reward: 30.0
+    beacon_discovery_reward: 0.5
+    beacon_gather_delta: 0.5
+    idle_penalty: 0.0005
+    idle_grace_steps: 5
+model:
+  architecture: structured_mappo
+  branch_hidden: 48
+  fused_hidden: 64
+  recurrent_hidden: 64
+  film: true
+  use_heterogeneity: false
+training:
+  total_updates: 1500
+  rollout_steps: 400
+  learning_rate: 0.0003
+  entropy_coef: 0.01
+  auxiliary_coef: 0.1
+  critic: graph
+  bootstrap_truncation: true
+  curriculum_max_stage: 7
+  output_dir: runs/beacon_structured_mappo_static_v4

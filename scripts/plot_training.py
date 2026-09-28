@@ -170,6 +170,11 @@ def summary(episodes: list[dict], updates: list[dict], window: int) -> list[str]
     ]
     if all("episode_return" in row for row in episodes):
         rows.insert(1, ("에피소드 리턴", mean(first, "episode_return"), mean(last, "episode_return"), "{:.2f}"))
+    if all("structure" in row for row in episodes):
+        def structure_mean(rows_: list[dict], key: str) -> float:
+            return float(np.mean([row["structure"][key] for row in rows_]))
+        for label, key in (("둑을 잡은 로봇", "edge_grips"), ("구조물 위 로봇", "on_structure"), ("연장된 로봇", "extended")):
+            rows.append((label, structure_mean(first, key), structure_mean(last, key), "{:.2f}"))
     for name, before, after, fmt in rows:
         lines_out.append(f"  {name:<16}{fmt.format(before):>12}{fmt.format(after):>12}")
 
@@ -235,7 +240,12 @@ def main() -> None:
     lines(ax, x, [("길이", get("step"))], raw=True); ax.set_ylim(bottom=0)
 
     ax = axes[1, 0]; style(ax, "구조 상태 (에피소드 끝)", "로봇 수 / 횟수"); stage_bands(ax, x, stages)
-    lines(ax, x, [("고정됨", get("anchored_robots")), ("추락", get("fallen_robots")), ("앵커 파손", get("anchor_failures"))])
+    if all("structure" in row for row in episodes):
+        structure = lambda key: np.array([float(row["structure"][key]) for row in episodes])  # noqa: E731
+        lines(ax, x, [("둑 고정", structure("edge_grips")), ("구조물 위", structure("on_structure")),
+                      ("연장", structure("extended")), ("추락", get("fallen_robots"))])
+    else:
+        lines(ax, x, [("고정됨", get("anchored_robots")), ("추락", get("fallen_robots")), ("앵커 파손", get("anchor_failures"))])
     ax.set_ylim(bottom=0)
 
     ax = axes[1, 1]; style(ax, "행동 비율", "비율"); stage_bands(ax, x, stages); ax.set_ylim(-0.02, 1.02)

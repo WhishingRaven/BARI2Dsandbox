@@ -32,6 +32,10 @@ class SensorConfig:
     ir_step: float = 0.025
     history: int = 4
     sensor_noise: float = 0.0
+    # Two local contact cues appended to each observation (off by default so
+    # existing checkpoints keep their input size): the robot directly ahead is
+    # anchored (touch / short-range signal), and the robot beneath is anchored.
+    structure_cues: bool = False
 
 
 @dataclass
@@ -110,6 +114,10 @@ class RewardConfig:
     # left cliff edge (0 = at the edge), so a grip close to the edge already
     # earns part of the span reward and a closer grip earns more.
     progress_baseline: float = 0.0
+    # Potential reward for robots standing on an anchored robot (at most
+    # ``climb_cap`` count); stepping down again gives it back.
+    climb_delta: float = 0.0
+    climb_cap: int = 1
 
 
 @dataclass
@@ -158,6 +166,15 @@ class EnvironmentConfig:
     # Per curriculum stage, the farthest a robot center may start from the
     # left cliff edge (the last value is reused; <= 0 means anywhere on the bank).
     spawn_edge_distance: list[float] = field(default_factory=list)
+    # Per curriculum stage, a prepared start (the last value is reused):
+    # "none", "root_only" (robot 0 grips the bank at the cliff edge),
+    # "walker_behind_root" (robot 1 also waits right behind it, facing it) or
+    # "walker_on_root" (robot 1 stands on the rear half of the gripping robot).
+    # A training scaffold for learning the late steps first; evaluate on "none".
+    start_setups: list[str] = field(default_factory=list)
+    # First curriculum stage with physical domain randomization (friction,
+    # mass, anchor strength, noise).
+    randomization_stage: int = 4
     actuator_noise: float = 0.0
     latent_sigma: float = 0.0
     latent_dim: int = 4

@@ -16,6 +16,10 @@ from bari2d.env.statics import max_load, stabilize
 from bari2d.utils.config import BEACON_FEATURE_SIZE, EnvironmentConfig
 
 
+START_SETUPS = ("none", "root_only", "walker_behind_root", "walker_on_root")
+CUE_SIZE = 2
+
+
 @dataclass(frozen=True)
 class ObservationLayout:
     ir: slice
@@ -23,6 +27,7 @@ class ObservationLayout:
     action_history: slice
     internal: slice
     beacon: slice
+    cues: slice
     goal: slice
     latent: slice
     size: int
@@ -44,11 +49,13 @@ def make_observation_layout(config: EnvironmentConfig) -> ObservationLayout:
     start = internal.stop
     beacon = slice(start, start + (BEACON_FEATURE_SIZE if config.beacon.enabled else 0))
     start = beacon.stop
+    cues = slice(start, start + (CUE_SIZE if config.sensor.structure_cues else 0))
+    start = cues.stop
     goal = slice(start, start + 1)
     start = goal.stop
     latent = slice(start, start + config.latent_dim)
     start = latent.stop
-    return ObservationLayout(ir, strain, action_history, internal, beacon, goal, latent, start, history, ray_count)
+    return ObservationLayout(ir, strain, action_history, internal, beacon, cues, goal, latent, start, history, ray_count)
 
 
 class BridgeEnv:
@@ -125,6 +132,8 @@ class BridgeEnv:
         self.target_load = self._sample_target_load()
         self.robots = self._initial_robots()
         self.contact_model.reset()
+        if self._start_setup() != "none":
+            self.contact_model.anchor(self.robots[0], self.robots, self.field)
         self.graph = self.contact_model.build_graph(self.robots, self.field, self.rng)
         self.step_count = 0
         self.phase = "construction"
@@ -158,7 +167,7 @@ class BridgeEnv:
             "sensor_noise": self.config.sensor.sensor_noise,
             "actuator_noise": self.config.actuator_noise,
         }
-        if self.config.curriculum_stage >= 4:
+        if self.config.curriculum_stage >= self.config.randomization_stage:
             friction_scale = float(self.rng.uniform(0.8, 1.2))
             anchor_scale = float(self.rng.uniform(0.8, 1.2))
             self.contact_model.config.friction *= friction_scale
@@ -192,13 +201,41 @@ class BridgeEnv:
         """
         count = self.config.robot.count
         robot_config = self.config.robot
-        robots: list[RobotState] = []
-        for robot_id in range(count):
+        robots: list[RobotState] = self._prepared_robots(self._start_setup())[:count]
+        for robot in robots:
+            robot.latent = self.rng.normal(0.0, self.config.latent_sigma, size=self.config.latent_dim).astype(np.float32)
+        for robot_id in range(len(robots), count):
             candidate = self._sample_initial_robot(robot_id, robots)
             candidate.latent = self.rng.normal(
                 0.0, self.config.latent_sigma, size=self.config.latent_dim
             ).astype(np.float32)
             robots.append(candidate)
+        return robots
+
+    def _start_setup(self) -> str:
+        setups = self.config.start_setups
+        if not setups:
+            return "none"
+        setup = setups[min(max(self.config.curriculum_stage - 1, 0), len(setups) - 1)]
+        if setup not in START_SETUPS:
+            raise ValueError(f"Unknown start setup: {setup}")
+        return setup
+
+    def _prepared_robots(self, setup: str) -> list[RobotState]:
+        """Robots placed for a start-state curriculum stage (anchoring happens in reset)."""
+        if setup == "none":
+            return []
+        length = self.config.robot.length
+        heading = float(np.arctan2(self.field.normal[1], self.field.normal[0]))
+        half_span = max(self.field.width / 2.0 - 1.5, 0.0)
+        tangent = float(self.rng.uniform(-half_span, half_span))
+        left, _ = self.field.boundaries(tangent)
+        root_position = self.field.center + self.field.normal * (left - 0.05) + self.field.tangent * tangent
+        robots = [RobotState(0, root_position.astype(float), heading)]
+        if setup == "walker_behind_root":
+            robots.append(RobotState(1, (root_position - self.field.normal * (length + 0.02)).astype(float), heading))
+        elif setup == "walker_on_root":
+            robots.append(RobotState(1, (root_position - self.field.normal * 0.25).astype(float), heading, layer=1))
         return robots
 
     def _sample_initial_robot(self, robot_id: int, existing: list[RobotState]) -> RobotState:
@@ -333,6 +370,7 @@ class BridgeEnv:
         previously_used = len(self._used_robots)
         old_beacon_source = self._beacon_source_id
         old_beacon_distance = self._mean_beacon_distance()
+        old_climb = self._climb_potential()
         newly_anchored = 0
         climb_layers = {
             robot.robot_id: min(robot.layer + 1, self.config.robot.max_layer)
@@ -425,6 +463,7 @@ class BridgeEnv:
                 else old_beacon_distance - new_beacon_distance
             ),
             "idle": -reward_config.idle_penalty * idle_violators,
+            "climb": reward_config.climb_delta * (self._climb_potential() - old_climb),
         }
         self._total_motion += energy_delta
         self._fallen_count = sum(robot.fallen for robot in self.robots)
@@ -456,6 +495,43 @@ class BridgeEnv:
         margin_y = self.config.robot.width / 2.0
         robot.position[0] = float(np.clip(robot.position[0], margin_x, self.field.length - margin_x))
         robot.position[1] = float(np.clip(robot.position[1], margin_y, self.field.width - margin_y))
+
+    def _robot_below_anchored(self, robot: RobotState) -> bool:
+        """Local cue: this robot stands on an anchored robot (felt through its underside)."""
+        if robot.fallen or robot.layer < 1:
+            return False
+        return any(
+            other.anchored and not other.fallen and other.layer == robot.layer - 1
+            and oriented_boxes_overlap(robot, other, self.config.robot)
+            for other in self.robots
+            if other.robot_id != robot.robot_id
+        )
+
+    def _structure_cues(self, robot: RobotState) -> np.ndarray:
+        """Local contact cues: [robot directly ahead is anchored, robot beneath is anchored]."""
+        if robot.fallen:
+            return np.zeros(CUE_SIZE, dtype=np.float32)
+        ahead = self._climb_support(robot)
+        return np.array(
+            [float(ahead is not None and ahead.anchored), float(self._robot_below_anchored(robot))],
+            dtype=np.float32,
+        )
+
+    def _climb_potential(self) -> float:
+        standing = sum(self._robot_below_anchored(robot) for robot in self.robots)
+        return float(min(standing, max(self.config.reward.climb_cap, 0)))
+
+    def structure_metrics(self) -> dict[str, int]:
+        """Counts for logging the construction steps."""
+        return {
+            "edge_grips": sum(r.anchored and r.anchor_partner == LEFT_BANK and not r.fallen for r in self.robots),
+            "on_structure": sum(self._robot_below_anchored(r) for r in self.robots),
+            "extended": sum(
+                r.anchored and isinstance(r.anchor_partner, int) and r.layer == 0 and not r.fallen
+                and self.field.is_gap(r.position)
+                for r in self.robots
+            ),
+        }
 
     def _structure_spans(self) -> bool:
         """Bank-to-bank connection that can carry load under the active physics model."""
@@ -719,6 +795,8 @@ class BridgeEnv:
             )
             if self.layout.beacon.stop > self.layout.beacon.start:
                 values[index, self.layout.beacon] = self._beacon_features[index]
+            if self.layout.cues.stop > self.layout.cues.start:
+                values[index, self.layout.cues] = self._structure_cues(robot)
             values[index, self.layout.goal] = self.target_load / max(self.config.load.max_target, 1.0e-9)
             values[index, self.layout.latent] = robot.latent
         return values
@@ -852,6 +930,7 @@ class BridgeEnv:
             "energy": self._total_motion,
             "anchor_failures": self.contact_model.anchor_failures,
             "fallen_robots": sum(robot.fallen for robot in self.robots),
+            "structure": self.structure_metrics(),
             "beacon": {
                 "active": self._beacon_source_id is not None,
                 "source_robot": self._beacon_source_id,
