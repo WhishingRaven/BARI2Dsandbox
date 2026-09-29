@@ -196,6 +196,11 @@ class ModelConfig:
     recurrent_hidden: int = 64
     film: bool = False
     use_heterogeneity: bool = False
+    # What the structured_mappo connectivity branch reads at each history step:
+    # ``ir`` - the IR rays only (the original branch, keeps old checkpoints loadable);
+    # ``ir_strain_action_cue`` - IR rays + own strain + previous action (one-hot)
+    #   + local contact cues, so connectivity/persistence targets are observable.
+    connectivity_inputs: str = "ir"
 
 
 @dataclass
@@ -222,6 +227,39 @@ class TrainingConfig:
     # A time-limit cut is not a real ending: add gamma * V(final state) to the
     # last reward instead of treating the cut as terminal in GAE.
     bootstrap_truncation: bool = True
+    # --- parallel rollouts ---------------------------------------------------
+    # Environments stepped per rollout ("sync": one process, "subprocess": one
+    # worker process per environment for wall-clock speed).  Each update then
+    # holds num_envs * rollout_steps team transitions.
+    num_envs: int = 1
+    vector_env: str = "sync"
+    # --- recurrent training ----------------------------------------------------
+    # Truncated BPTT chunk length (0 = the whole rollout).  Each chunk starts
+    # from the hidden state stored during the rollout.  Must divide rollout_steps.
+    recurrent_chunk: int = 0
+    # PPO minibatches per epoch over (chunk, env, robot) sequences.  0 keeps the
+    # original split by robots (ceil(robot count / sequence_minibatch_agents)).
+    num_minibatches: int = 0
+    # --- critic ----------------------------------------------------------------
+    # Agent-conditioned centralized value V_i = f(h_i, h_pooled): one value per
+    # robot, so each robot gets its own advantage (graph critic only).
+    critic_agent_conditioned: bool = False
+    # Updates at the start of a run in which only the critic learns (the actor
+    # is frozen), so a pretrained policy is not pushed around by a fresh critic.
+    critic_warmup_updates: int = 0
+    # --- demonstration-guided RL ------------------------------------------------
+    # L = L_PPO + bc_coef * L_BC + auxiliary_coef * L_aux, with bc_coef annealed
+    # linearly to bc_coef_final over bc_decay_updates.  L_BC is the cross-entropy
+    # of the policy on scripted-teacher demonstrations stored at demo_path
+    # (written by scripts/pretrain_bc.py).
+    demo_path: str = ""
+    bc_coef: float = 0.0
+    bc_coef_final: float = 0.0
+    bc_decay_updates: int = 0
+    bc_batch_episodes: int = 4
+    # Weight of IDLE labels given to robots the teacher is not moving (most
+    # labels), so behaviour cloning does not collapse onto IDLE.
+    bc_idle_weight: float = 0.2
 
 
 @dataclass

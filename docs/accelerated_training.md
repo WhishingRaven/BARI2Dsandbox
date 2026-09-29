@@ -1,0 +1,76 @@
+# 가속 학습과 시연 기반 학습 (v5)
+
+`configs/beacon_structured_mappo_static_v5.yaml`은 v4와 같은 과제(7단계 시작 상태 커리큘럼, 구조 cue, 보상, 정적 물리)를 쓰면서 학습 방식만 바꾼다. v4는 1500 업데이트 동안 2단계까지만 갔다. 원인은 세 가지로 봤다. 초반에 IDLE로 굳었고, 5대가 팀 어드밴티지 하나를 나눠 받았고, 업데이트마다 400스텝 에피소드 하나만 봤다.
+
+## 실행 순서
+
+    conda activate bari_26
+    python scripts/pretrain_bc.py --config configs/beacon_structured_mappo_static_v5.yaml
+    python scripts/train.py --config configs/beacon_structured_mappo_static_v5.yaml \
+      --pretrained runs/beacon_structured_mappo_static_v5/bc_pretrain.pt
+
+- `pretrain_bc.py`는 시연을 만들어 `training.demo_path`에 저장하고, 행동 복제(BC)로 학습한 actor를 `bc_pretrain.pt`로 저장한다.
+- 시연을 다시 만들지 않으려면 `--reuse-demos`를 붙인다. 워커 수는 `--workers`, 에피소드 수는 `--episodes`(기본 240)로 바꾼다.
+- `--eval-episodes 5`를 붙이면 단계별로 BC 정책의 성공률을 출력한다.
+- 이어서 학습할 때는 `--resume runs/.../checkpoint_XXXXXX.pt --updates 목표`를 쓴다. 이제 체크포인트에 커리큘럼 단계가 저장되어 그 단계부터 이어진다.
+
+## 1. 시연 기반 사전학습 (reverse curriculum + behaviour cloning)
+
+- **교사** (`bari2d/rl/teacher.py`): 시뮬레이터 전체 상태를 보는 스크립트 건설자다. 한 번에 한 대만 움직인다.
+  1. 둑을 잡은 로봇이 없으면 가장자리에 가장 가까운 로봇이 가장자리로 가서 ANCHOR 한다.
+  2. 구조물 위에 선 로봇이 있으면 앞끝까지 가서 grip-and-extend 한다.
+  3. 없으면 가장 가까운 로봇이 뿌리 로봇 뒤로 가서 CLIMB 한다.
+  - 보상에는 쓰이지 않는다. 오직 행동 레이블을 만드는 데만 쓴다.
+- **시연 생성** (`bari2d/rl/demonstrations.py`): 각 단계의 시작 상태에서 교사를 돌린다.
+  - 움직이는 로봇은 확률 ε(기본 0.1), 기다리는 로봇은 ε/4로 실제 실행 행동을 무작위 유효 행동으로 바꾼다. 이때 레이블은 교사 행동 그대로 둔다. 그래서 교사 경로 주변(tube)과 벗어났을 때의 복귀를 함께 보여 준다.
+  - RELEASE는 주입하지 않는다.
+  - 관측은 항상 시뮬레이터가 만든다. 센서 이력과 GRU 상태가 물리적으로 일관되게 유지된다.
+- **손실**: `L_BC = −Σ w·log π(a_teacher | o, h) / Σ w`.
+  - 교사가 움직이는 로봇의 가중치는 1이다.
+  - 기다리는 로봇의 IDLE 레이블은 `bc_idle_weight`(기본 0.2)로 낮춘다. IDLE로 굳는 것을 막기 위해서다.
+  - 사전학습에서는 보조 cue 손실도 함께 학습한다.
+- **PPO 미세조정**: `L = L_PPO + bc_coef·L_BC + auxiliary_coef·L_aux`.
+  - 처음 `critic_warmup_updates`(v5: 10) 업데이트 동안은 critic만 학습한다. 새 critic은 성공 보상(+30) 때문에 처음 손실이 크고, 이 상태로 사전학습된 정책을 흔들지 않게 하려는 것이다.
+  - `bc_coef`는 `bc_decay_updates` 동안 `bc_coef_final`까지 선형으로 줄어든다. v5는 0.5에서 300 업데이트 동안 0으로 간다.
+- 교사 성공률 (5대, ε=0 기준): 1–4단계는 각각 4/4, 4/4, 5/5, 5/5(약 90–150스텝), 5단계는 3/3이다. 6단계(틈 2.3)는 400스텝이 빠듯해서 1/3이다.
+
+## 2. 에이전트 조건부 중앙 가치 (agent-conditioned centralized value)
+
+- `training.critic_agent_conditioned: true`이면 그래프 critic이 로봇마다 `V_i = f(h_i, mean_j h_j)`를 낸다. 메시지 전달까지는 기존과 같고, 마지막 value head만 `[h_i, h_pooled]`를 입력으로 받는다.
+- GAE는 로봇별로 계산한다. 팀 보상은 같아도 가치가 다르므로 로봇마다 어드밴티지가 달라진다.
+- 시간 제한 bootstrap도 로봇별로 `γ·V_i(s_T)`를 더한다.
+- actor는 여전히 국소 관측만 쓴다. 분산 실행은 그대로다.
+
+## 3. connectivity branch 입력
+
+- `model.connectivity_inputs: ir_strain_action_cue`이면 structured_mappo의 connectivity branch가 이력 한 스텝마다 다음을 읽는다.
+  - IR 5방향
+  - 자기 strain
+  - 직전 행동(one-hot 10)
+  - 국소 접촉 cue 2개
+- 합계 18채널이다. 보조 타깃(접촉 수, 지속 접촉 수)을 관측으로 추정할 수 있게 하려는 것이다.
+- 기본값 `ir`은 예전 branch 그대로라서 v3/v4 체크포인트가 그대로 로드된다.
+
+## 4. 시퀀스 단위 인코딩과 nn.GRU
+
+- 학습 시 `(T, N, D)` 관측을 `(T·N, D)`로 펴서 모든 branch를 한 번에 인코딩한다. 그다음 `(T, N, H)`를 `nn.GRU` 한 번에 넣는다.
+- 에피소드가 시퀀스 중간에 끝난 열은 그 스텝부터 0 hidden으로 다시 돌려 이어 붙인다. 스텝별 계산과 수치가 같은지 테스트로 확인했다.
+- `training.recurrent_chunk`(v5: 32)로 truncated BPTT를 한다. 각 조각은 rollout 때 저장한 hidden에서 시작한다.
+- `training.num_minibatches`(v5: 4)는 (조각, 환경, 로봇) 시퀀스를 섞어 나눈다.
+- `nn.GRUCell` 시절 체크포인트는 가중치 이름을 자동으로 바꿔 로드한다(`weight_ih` → `weight_ih_l0` 등).
+
+## 5. 병렬 rollout
+
+- `training.num_envs`개의 환경을 함께 돌린다(v5: 8개 × 128스텝 = 업데이트당 1024 팀 전이).
+- `training.vector_env`
+  - `sync`: 한 프로세스에서 차례로 돌린다.
+  - `subprocess`: 환경마다 워커 프로세스를 띄운다(spawn 방식이라 Windows에서도 동작한다).
+- 두 방식은 같은 seed에서 같은 결과를 낸다.
+- 환경 i의 seed는 `seed + 1000·i`이고, 환경 0은 기존 seed를 쓴다.
+- 커리큘럼은 모든 환경의 에피소드를 합쳐 판단한다. 단계가 오르면 모든 워커에 알리고, 다음 리셋부터 새 단계로 시작한다. 이전 단계에서 진행 중이던 에피소드는 판단에서 제외한다.
+- `train.py --num-envs N`으로 설정을 덮어쓸 수 있다. CPU 코어 수에 맞추면 된다.
+
+## 새로 기록되는 값
+
+- `updates.jsonl`: `policy_loss`, `approx_kl`, `clip_fraction`, `explained_variance`, `bc_loss`, `bc_coef`, `episodes`.
+- `episodes.jsonl`: 에피소드를 돌린 환경 번호 `env_index`와, 그 에피소드가 실제로 진행된 `curriculum_stage`.

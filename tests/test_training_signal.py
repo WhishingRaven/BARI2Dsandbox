@@ -129,12 +129,15 @@ def test_time_limit_truncation_is_bootstrapped(monkeypatch: pytest.MonkeyPatch, 
     stored: list[tuple[float, bool]] = []
     original_add = trainer_module.RolloutBuffer.add
 
-    def capture(self, observation, global_state, actions, log_probabilities, action_masks, reset_mask, reward, value, done, *rest):
-        stored.append((float(reward), bool(done)))
-        return original_add(self, observation, global_state, actions, log_probabilities, action_masks, reset_mask, reward, value, done, *rest)
+    def capture(self, observations, global_states, actions, log_probabilities, action_masks, reset_masks, hidden_states, rewards, values, dones, *rest):
+        # One environment; every robot gets the same team reward (plus the same bootstrap here).
+        stored.append((float(rewards[0, 0]), bool(dones[0])))
+        return original_add(
+            self, observations, global_states, actions, log_probabilities, action_masks, reset_masks, hidden_states, rewards, values, dones, *rest
+        )
 
     monkeypatch.setattr(trainer_module.RolloutBuffer, "add", capture)
-    monkeypatch.setattr(Trainer, "_state_value", lambda self: 10.0)
+    monkeypatch.setattr(Trainer, "_values", lambda self, states, graph: np.full((len(states), self.env.config.robot.count), 10.0, dtype=np.float32))
     trainer = Trainer(config, "cpu")
     trainer.train()
     episodes = [line for line in (tmp_path / "run" / "episodes.jsonl").read_text().splitlines() if line]

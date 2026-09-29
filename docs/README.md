@@ -8,6 +8,7 @@ BARI2D는 약 20대의 동일한 크롤링 로봇이 국소 센서와 공유 정
 - [physics-baseline.md](physics-baseline.md): 변경하지 않은 BARI 물리 환경 기준
 - [simulation.md](simulation.md): 간극, 로봇, 센서, 접촉, 앵커와 하중 시험
 - [training.md](training.md): 분산 행위자, 중앙 비평가, MAPPO와 커리큘럼
+- [accelerated_training.md](accelerated_training.md): 교사 시연 기반 사전학습, 로봇별 가치, nn.GRU 시퀀스 학습, 병렬 rollout (v5)
 - [experiments.md](experiments.md): 검증, 절제 실험, 지표와 재현 절차
 - [configurations.md](configurations.md): baseline, bio_film 및 모든 학습 YAML의 차이와 공정 비교법
 - [inference.md](inference.md): 체크포인트 선택과 그래픽 정책 추론

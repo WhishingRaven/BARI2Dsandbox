@@ -22,15 +22,31 @@ class MessagePassingLayer(nn.Module):
 
 
 class GraphCritic(nn.Module):
-    """Training-only centralized graph critic without external GNN dependencies."""
+    """Training-only centralized graph critic without external GNN dependencies.
 
-    def __init__(self, node_size: int = 13, edge_size: int = 6, hidden_size: int = 64, layers: int = 2):
+    ``agent_conditioned=False`` pools all robot embeddings into one team value
+    V(s).  ``agent_conditioned=True`` returns one value per robot,
+    V_i(s) = f(h_i, mean_j h_j), so each robot gets its own advantage while
+    the actors stay decentralized.
+    """
+
+    def __init__(
+        self,
+        node_size: int = 13,
+        edge_size: int = 6,
+        hidden_size: int = 64,
+        layers: int = 2,
+        agent_conditioned: bool = False,
+    ):
         super().__init__()
+        self.agent_conditioned = agent_conditioned
         self.node_encoder = nn.Sequential(nn.Linear(node_size, hidden_size), nn.Tanh())
         self.layers = nn.ModuleList(MessagePassingLayer(hidden_size, edge_size) for _ in range(layers))
-        self.value_head = nn.Sequential(nn.Linear(hidden_size, hidden_size), nn.Tanh(), nn.Linear(hidden_size, 1))
+        head_input = hidden_size * 2 if agent_conditioned else hidden_size
+        self.value_head = nn.Sequential(nn.Linear(head_input, hidden_size), nn.Tanh(), nn.Linear(hidden_size, 1))
 
     def forward(self, nodes: torch.Tensor, adjacency: torch.Tensor, edges: torch.Tensor) -> torch.Tensor:
+        """Team value (B,) or per-robot values (B, N); the batch dimension is optional."""
         if nodes.ndim == 2:
             nodes, adjacency, edges = nodes.unsqueeze(0), adjacency.unsqueeze(0), edges.unsqueeze(0)
             squeeze = True
@@ -40,5 +56,9 @@ class GraphCritic(nn.Module):
         for layer in self.layers:
             hidden = layer(hidden, adjacency, edges)
         pooled = hidden.mean(dim=1)
-        value = self.value_head(pooled).squeeze(-1)
+        if self.agent_conditioned:
+            features = torch.cat((hidden, pooled.unsqueeze(1).expand_as(hidden)), dim=-1)
+            value = self.value_head(features).squeeze(-1)
+        else:
+            value = self.value_head(pooled).squeeze(-1)
         return value.squeeze(0) if squeeze else value

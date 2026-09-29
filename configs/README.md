@@ -18,6 +18,7 @@
 | beacon_structured_mappo_static_v2.yaml | structured_mappo | graph | static + 로봇 10대, 400스텝, frontier 진행도, 낮춘 벌점 |
 | beacon_structured_mappo_static_v3.yaml | structured_mappo | graph | static + 로봇 5대, 가장자리 근처 출발, 둑을 잡은 구조물만 진행도, 엔트로피 0.01 |
 | beacon_structured_mappo_static_v4.yaml | structured_mappo | graph | v3 + 준비된 시작 상태 커리큘럼(7단계), 로컬 구조 cue, 올라서기 보상 |
+| beacon_structured_mappo_static_v5.yaml | structured_mappo | graph (로봇별 가치) | v4 과제 + 교사 시연 BC 사전학습, 로봇별 가치, 확장 connectivity 입력, nn.GRU 시퀀스 학습, 병렬 환경 8개 (docs/accelerated_training.md) |
 
 기본 Structured MAPPO를 학습한다.
 
