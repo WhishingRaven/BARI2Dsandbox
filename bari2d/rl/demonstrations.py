@@ -109,15 +109,29 @@ def generate_demonstrations(
     epsilon: float = 0.1,
     seed: int = 0,
     workers: int = 1,
+    progress: bool = False,
 ) -> list[DemoEpisode]:
-    """``episodes`` teacher episodes spread evenly over ``stages`` (parallel when workers > 1)."""
+    """``episodes`` teacher episodes, stage ``stages[i % len(stages)]`` for episode i (parallel when workers > 1)."""
     tasks = [(config, stages[index % len(stages)], seed + index, epsilon) for index in range(episodes)]
+    report_every = max(len(tasks) // 10, 1)
+    results: list[DemoEpisode] = []
+
+    def collect(episode: DemoEpisode) -> None:
+        results.append(episode)
+        if progress and (len(results) % report_every == 0 or len(results) == len(tasks)):
+            successes = sum(item.success for item in results)
+            print(f"  {len(results)}/{len(tasks)} teacher episodes done ({successes} successful)", flush=True)
+
     if workers <= 1:
-        return [_record_task(task) for task in tasks]
+        for task in tasks:
+            collect(_record_task(task))
+        return results
     import multiprocessing as mp
 
     with mp.get_context("spawn").Pool(workers) as pool:
-        return list(pool.imap(_record_task, tasks))
+        for episode in pool.imap(_record_task, tasks):
+            collect(episode)
+    return results
 
 
 class DemonstrationSet:

@@ -74,3 +74,36 @@
 
 - `updates.jsonl`: `policy_loss`, `approx_kl`, `clip_fraction`, `explained_variance`, `bc_loss`, `bc_coef`, `episodes`.
 - `episodes.jsonl`: 에피소드를 돌린 환경 번호 `env_index`와, 그 에피소드가 실제로 진행된 `curriculum_stage`.
+
+## 6. v6: 설계와 같은 둑 잡기 규칙과 BC 하한
+
+`configs/beacon_structured_mappo_static_v6.yaml`
+
+v5는 update 376에 4단계(빈 상태에서 짓기)에 올라갔지만, update 792까지 4단계 성공률이 5% 안팎에 머물렀다. 4단계 에피소드의 62%에서 로봇이 가장자리보다 뒤에서 둑을 잡았다. 이런 grip이 있는 에피소드의 성공률은 2.7%, 없는 에피소드는 7.9%였다. 원인은 시뮬레이터가 설계와 달랐기 때문이다.
+
+- 아래 IR이 로봇 **중심**에 있었다. 설계는 15 cm 몸체의 앞에서 4 cm다.
+- 둑 ANCHOR는 수평 IR 네 방향 중 **아무 방향**에서나 중심에서 1.2 안에 절벽이 보이면 허용됐다. 그래서 앞끝이 가장자리보다 0.75 뒤에 있거나 옆·뒤를 보고 있어도 잡을 수 있었다.
+
+v6에서 바꾼 것:
+
+- `sensor.downward_ir_offset: 0.21`: 배쪽 IR을 중심보다 0.21 앞(= 0.45 − 0.9·4/15)에 둔다. 그 점 바로 아래의 제방이나 하위 로봇만 표면으로 본다.
+- `contact.anchor_rule: front_downward_ir`: layer 0 로봇은 앞쪽 배 IR이 바닥을 보지 못하고 중심은 아직 둑 위에 있을 때만 둑을 잡는다. 앞발이 턱을 넘은 자세이며, 중심이 가장자리 0~0.21 뒤에서 앞을 향한 경우다. 노트의 "아래에 아무것도 없으면 멈춰서 가시로 결합" 규칙과 같다. 로봇끼리의 grip 조건은 그대로다.
+- `bc_coef_final: 0.05`: BC 계수가 300 업데이트 동안 0.5에서 0이 아니라 0.05로 줄고, 이후 그 값을 유지한다. 보상만으로는 드물게 나오는 교사 행동(쓸모없는 grip 풀기, 뿌리 뒤로 가서 CLIMB)을 계속 약하게 당겨 준다. PPO 어드밴티지가 강하게 반대하면 PPO가 이긴다.
+- `demo_episodes: 300`, `demo_stages: [1, 2, 3, 3, 4, 4, 4, 5, 5, 6]`: 아래 IR 값의 의미가 바뀌었으므로 시연을 새로 만든다. 4단계 90개, 3·5단계 각 60개, 1·2·6단계 각 30개다. 교사가 풀지 못하는 7단계는 뺐다. `pretrain_bc.py --stages`로 덮어쓸 수 있고, 같은 단계를 여러 번 쓰면 그만큼 비중이 커진다.
+- `entropy_coef`와 나머지 설정은 v5와 같다. 설계 규칙과 BC 하한의 효과만 보기 위해서다.
+
+확인한 것:
+
+- 교사(ε=0)는 새 규칙에서 1~4단계 12/12 성공, 5단계 2/3이다. 같은 seed에서 예전 규칙과 결과가 같다. ε=0.1이면 1~4단계 12/12, 5단계 1/3이다.
+- 둑 ANCHOR 마스크가 더 이상 수평 ray 탐색을 하지 않아 환경 스텝이 약 1.7배 빨라졌다(4단계 무작위 행동 기준 55 → 31 ms/step).
+- `tests/test_front_anchor.py`: 가장자리 거리·방향별 마스크, 기본값(`edge_band`)에서 예전 동작 유지, 센서 위치와 값, 위층 로봇 제외, 잘못된 설정 거부, 교사 4단계 성공, 단계 가중 시연 생성, BC 하한.
+
+실행 순서 (시연 생성과 BC부터 다시):
+
+    conda activate bari_26
+    python scripts/pretrain_bc.py --config configs/beacon_structured_mappo_static_v6.yaml --eval-episodes 5
+    python scripts/train.py --config configs/beacon_structured_mappo_static_v6.yaml --pretrained runs/beacon_structured_mappo_static_v6/bc_pretrain.pt
+
+- 시연 생성 중에는 10%마다 `k/300 teacher episodes done`이 출력된다.
+- v5 결과(`runs/beacon_structured_mappo_static_v5`)는 그대로 남는다. v6는 `runs/beacon_structured_mappo_static_v6`에 쓴다.
+- v5 체크포인트는 기본값이 예전 규칙이므로 그대로 로드되고 재생된다. 다만 v6 환경에서는 아래 IR 값의 의미가 다르므로 v6는 BC부터 새로 학습한다.

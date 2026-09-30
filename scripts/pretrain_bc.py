@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Behaviour-cloning pretraining from scripted-teacher demonstrations.
 
-    python scripts/pretrain_bc.py --config configs/beacon_structured_mappo_static_v5.yaml
-    python scripts/train.py --config configs/beacon_structured_mappo_static_v5.yaml \
-        --pretrained runs/beacon_structured_mappo_static_v5/bc_pretrain.pt
+    python scripts/pretrain_bc.py --config configs/beacon_structured_mappo_static_v6.yaml
+    python scripts/train.py --config configs/beacon_structured_mappo_static_v6.yaml \
+        --pretrained runs/beacon_structured_mappo_static_v6/bc_pretrain.pt
 
 1. The scripted teacher (bari2d/rl/teacher.py) builds bridges from the start
    states of the curriculum stages; with probability --epsilon each executed
@@ -55,8 +55,11 @@ def evaluate(actor: SharedRecurrentActor, config: ExperimentConfig, stage: int, 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True)
-    parser.add_argument("--episodes", type=int, default=240, help="teacher episodes, spread evenly over --stages")
-    parser.add_argument("--stages", type=int, nargs="+", help="curriculum stages to demonstrate (default: 1..curriculum_max_stage)")
+    parser.add_argument("--episodes", type=int, help="teacher episodes, spread over --stages (default: training.demo_episodes or 240)")
+    parser.add_argument(
+        "--stages", type=int, nargs="+",
+        help="curriculum stages to demonstrate, in turn; repeat one to weight it (default: training.demo_stages or 1..curriculum_max_stage)",
+    )
     parser.add_argument("--epsilon", type=float, default=0.1, help="probability of a random executed action per robot and step")
     parser.add_argument("--workers", type=int, default=min(4, os.cpu_count() or 1), help="processes for demonstration generation")
     parser.add_argument("--demos", help="demonstration file (default: training.demo_path or <output_dir>/demos.pt)")
@@ -76,7 +79,8 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     demo_path = Path(arguments.demos or training.demo_path or output_dir / "demos.pt")
     output = Path(arguments.output or output_dir / "bc_pretrain.pt")
-    stages = arguments.stages or list(range(1, training.curriculum_max_stage + 1))
+    stages = arguments.stages or list(training.demo_stages) or list(range(1, training.curriculum_max_stage + 1))
+    episode_count = arguments.episodes or training.demo_episodes or 240
     random.seed(arguments.seed)
     torch.manual_seed(arguments.seed)
 
@@ -85,9 +89,9 @@ def main() -> None:
         demonstrations = DemonstrationSet.load(demo_path)
         print(f"Loaded {len(demonstrations)} demonstrations from {demo_path}", flush=True)
     else:
-        print(f"Generating {arguments.episodes} teacher episodes over stages {stages} with {arguments.workers} worker(s)...", flush=True)
+        print(f"Generating {episode_count} teacher episodes over stages {stages} with {arguments.workers} worker(s)...", flush=True)
         episodes = generate_demonstrations(
-            config.environment, stages, arguments.episodes, arguments.epsilon, arguments.seed, arguments.workers
+            config.environment, stages, episode_count, arguments.epsilon, arguments.seed, arguments.workers, progress=True
         )
         demonstrations = DemonstrationSet(episodes)
         demonstrations.save(demo_path)
@@ -136,7 +140,7 @@ def main() -> None:
     }
     if arguments.eval_episodes > 0:
         actor.eval()
-        for stage in stages:
+        for stage in sorted(set(stages)):
             rate = evaluate(actor, config, stage, arguments.eval_episodes, seed=10_000 + arguments.seed)
             pretrain_info[f"success_stage_{stage}"] = rate
             print(f"  BC policy, stage {stage}: success {rate:.0%} over {arguments.eval_episodes} episodes", flush=True)

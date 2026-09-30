@@ -7,6 +7,7 @@ import numpy as np
 from matplotlib import animation, colors, patches, transforms
 
 from bari2d.env.bridge_env import BridgeEnv
+from bari2d.env.sensors import downward_ir_point
 
 
 def robot_layer_color(layer: int, max_layer: int) -> tuple[float, float, float, float]:
@@ -93,9 +94,10 @@ def draw_environment(env: BridgeEnv, axis: plt.Axes | None = None) -> plt.Axes:
                 zorder=layer_zorder + 1,
             )
         if env.config.sensor.downward_ir_enabled:
+            sensor_point = downward_ir_point(robot, env.config.sensor)
             axis.scatter(
-                [robot.position[0]],
-                [robot.position[1]],
+                [sensor_point[0]],
+                [sensor_point[1]],
                 marker="v",
                 color="#7b3294",
                 s=16,

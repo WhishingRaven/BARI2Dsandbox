@@ -10,13 +10,14 @@ from bari2d.env.contact_model import ContactGraph, ContactModel, oriented_boxes_
 from bari2d.env.field import LEFT_BANK, RIGHT_BANK, GapField, GapGenerator
 from bari2d.env.load_evaluator import FastLoadEvaluator, IncrementalLoadEvaluator, LoadTestResult
 from bari2d.env.robot import ACTION_COUNT, DiscreteAction, RobotState
-from bari2d.env.sensors import cliff_sensor_direction, ir_distances, ir_ray_count
+from bari2d.env.sensors import cliff_sensor_direction, front_over_cliff, ir_distances, ir_ray_count
 from bari2d.env.static_physics import PHYSICS_MODELS, StaticContactModel, build_structure
 from bari2d.env.statics import max_load, stabilize
 from bari2d.utils.config import BEACON_FEATURE_SIZE, EnvironmentConfig
 
 
 START_SETUPS = ("none", "root_only", "walker_behind_root", "walker_on_root")
+ANCHOR_RULES = ("edge_band", "front_downward_ir")
 CUE_SIZE = 2
 
 
@@ -80,6 +81,12 @@ class BridgeEnv:
             )
         else:
             self.contact_model = ContactModel(deepcopy(self.config.contact), self.config.robot)
+        if self.config.contact.anchor_rule not in ANCHOR_RULES:
+            raise ValueError(f"Unknown contact.anchor_rule: {self.config.contact.anchor_rule}")
+        if self.config.contact.anchor_rule == "front_downward_ir" and (
+            not self.config.sensor.downward_ir_enabled or self.config.sensor.downward_ir_offset <= 0.0
+        ):
+            raise ValueError("anchor_rule front_downward_ir needs the downward IR ahead of the centre (sensor.downward_ir_offset > 0)")
         self._static_spans = False
         self.fast_evaluator = FastLoadEvaluator()
         self.accurate_evaluator = IncrementalLoadEvaluator(self.config.load)
@@ -302,13 +309,20 @@ class BridgeEnv:
         """Return whether a physically meaningful anchor can be made locally."""
         if not self.contact_model.can_anchor(robot, self.robots, self.field):
             return False
-        if not self.config.contact.anchor_requires_edge_or_contact:
+        front_rule = self.config.contact.anchor_rule == "front_downward_ir"
+        if not self.config.contact.anchor_requires_edge_or_contact and not front_rule:
             return True
         partner = self.contact_model.candidate_anchor(robot, self.robots, self.field)
         if isinstance(partner, int):
+            if not self.config.contact.anchor_requires_edge_or_contact:
+                return True
             return oriented_boxes_overlap(robot, self.robots[partner], self.config.robot)
         if partner is None:
             return False
+        if front_rule:
+            # Design rule: the front feet hook the lip, i.e. the belly IR (ahead
+            # of the centre) sees no floor while the centre is still on the bank.
+            return front_over_cliff(robot, self.robots, self.field, self.config.robot, self.config.sensor)
         reading = cliff_sensor_direction(robot, self.robots, self.field, self.config.robot, self.config.sensor)
         return reading is not None and reading[1] <= self.config.contact.anchor_edge_band
 

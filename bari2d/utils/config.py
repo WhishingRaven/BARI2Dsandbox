@@ -29,6 +29,11 @@ class SensorConfig:
     ir_range: float = 3.0
     ir_angles_deg: list[float] = field(default_factory=lambda: [0.0, 180.0, 90.0, -90.0])
     downward_ir_enabled: bool = True
+    # Where the downward (belly) IR sits, as a distance ahead of the body
+    # centre along the heading.  0 keeps the original centre sensor.  The
+    # hardware design puts it 4 cm behind the front of a 15 cm body:
+    # length / 2 - 4 / 15 * length = 0.45 - 0.24 = 0.21 for length 0.9.
+    downward_ir_offset: float = 0.0
     ir_step: float = 0.025
     history: int = 4
     sensor_noise: float = 0.0
@@ -54,6 +59,15 @@ class ContactConfig:
     # edge, while a robot-to-robot anchor needs a real physical contact.
     anchor_requires_edge_or_contact: bool = False
     anchor_edge_band: float = 1.2
+    # Rule for gripping a bank.
+    #   "edge_band": a planar IR ray in any direction sees the cliff within
+    #       anchor_edge_band of the body centre (original rule; allows grips
+    #       up to ~0.75 behind the edge and while facing sideways).
+    #   "front_downward_ir": the design rule - a ground-level robot grips the
+    #       bank only when its front belly IR (sensor.downward_ir_offset) sees
+    #       nothing below while its centre is still on the bank, i.e. the front
+    #       feet are over the lip.
+    anchor_rule: str = "edge_band"
 
 
 @dataclass
@@ -257,6 +271,11 @@ class TrainingConfig:
     bc_coef_final: float = 0.0
     bc_decay_updates: int = 0
     bc_batch_episodes: int = 4
+    # Demonstrations written by scripts/pretrain_bc.py: episodes spread over
+    # demo_stages in order (repeat a stage to weight it; empty = every stage
+    # up to curriculum_max_stage once).  0 episodes = the script default (240).
+    demo_episodes: int = 0
+    demo_stages: list[int] = field(default_factory=list)
     # Weight of IDLE labels given to robots the teacher is not moving (most
     # labels), so behaviour cloning does not collapse onto IDLE.
     bc_idle_weight: float = 0.2
