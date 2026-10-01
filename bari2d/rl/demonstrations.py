@@ -44,12 +44,15 @@ class DemoEpisode:
     auxiliary_targets: dict[str, np.ndarray]  # (T, N)
     stage: int
     success: bool
+    ignore: np.ndarray | None = None  # (T,) steps without loss weight (window burn-in)
 
     def __len__(self) -> int:
         return int(self.actions.shape[0])
 
 
-def record_episode(config: EnvironmentConfig, stage: int, seed: int, epsilon: float = 0.1) -> DemoEpisode:
+def record_episode(
+    config: EnvironmentConfig, stage: int, seed: int, epsilon: float = 0.1, idle_epsilon_scale: float = 0.25
+) -> DemoEpisode:
     """Run the teacher once from the start state of ``stage``."""
     environment_config = deepcopy(config)
     environment_config.curriculum_stage = int(stage)
@@ -67,10 +70,10 @@ def record_episode(config: EnvironmentConfig, stage: int, seed: int, epsilon: fl
         executed = teacher_actions.copy()
         for robot_id in range(len(executed)):
             # The moving robot is perturbed with probability epsilon, waiting robots
-            # four times less often.  Only motion, CLIMB and IDLE are injected:
+            # with epsilon * idle_epsilon_scale (default a quarter).  Only motion, CLIMB and IDLE are injected:
             # a random ANCHOR/RELEASE would fix or undo structure rather than show a
             # recoverable deviation.
-            rate = epsilon if robot_id == worker else epsilon / 4.0
+            rate = epsilon if robot_id == worker else epsilon * idle_epsilon_scale
             if rng.random() < rate:
                 choices = [a for a in np.flatnonzero(action_masks[robot_id]) if a not in PROTECTED_ACTIONS]
                 if choices:
@@ -98,7 +101,7 @@ def record_episode(config: EnvironmentConfig, stage: int, seed: int, epsilon: fl
     )
 
 
-def _record_task(arguments: tuple[EnvironmentConfig, int, int, float]) -> DemoEpisode:
+def _record_task(arguments: tuple[EnvironmentConfig, int, int, float, float]) -> DemoEpisode:
     return record_episode(*arguments)
 
 
@@ -110,9 +113,10 @@ def generate_demonstrations(
     seed: int = 0,
     workers: int = 1,
     progress: bool = False,
+    idle_epsilon_scale: float = 0.25,
 ) -> list[DemoEpisode]:
     """``episodes`` teacher episodes, stage ``stages[i % len(stages)]`` for episode i (parallel when workers > 1)."""
-    tasks = [(config, stages[index % len(stages)], seed + index, epsilon) for index in range(episodes)]
+    tasks = [(config, stages[index % len(stages)], seed + index, epsilon, idle_epsilon_scale) for index in range(episodes)]
     report_every = max(len(tasks) // 10, 1)
     results: list[DemoEpisode] = []
 
@@ -183,6 +187,8 @@ class DemonstrationSet:
             actions[:length, span] = episode.actions
             masks[:length, span] = episode.action_masks
             weights[:length, span] = np.where(episode.active | (episode.actions != IDLE), 1.0, idle_weight)
+            if episode.ignore is not None:
+                weights[:length, span][episode.ignore] = 0.0
             for name in AUXILIARY_TARGETS:
                 auxiliary[name][:length, span] = episode.auxiliary_targets[name]
         return {
@@ -219,7 +225,50 @@ class DemonstrationSet:
             }
         return bc_loss, auxiliary_loss, stats
 
-    def behaviour_cloning_loss(self, actor, batch_episodes: int, idle_weight: float, device: torch.device | str) -> torch.Tensor:
-        batch = self.batch(self.sample(batch_episodes), idle_weight, device)
-        bc_loss, _, _ = self.losses(actor, batch)
+    def sample_windows(self, count: int, window: int, burn_in: int) -> list[DemoEpisode]:
+        """``count`` random stretches of at most ``window`` steps (burn-in steps carry no loss weight)."""
+        windows = []
+        for episode in self.sample(count):
+            length = len(episode)
+            if length <= window:
+                windows.append(episode)
+                continue
+            start = self._rng.randrange(0, length - window + 1)
+            cut = slice(start, start + window)
+            active = episode.active[cut].copy()
+            labels = episode.actions[cut].copy()
+            ignore = np.zeros(window, dtype=bool)
+            ignore[: burn_in if start > 0 else 0] = True
+            windows.append(
+                DemoEpisode(
+                    observations=episode.observations[cut],
+                    actions=labels,
+                    action_masks=episode.action_masks[cut],
+                    active=active,
+                    auxiliary_targets={name: values[cut] for name, values in episode.auxiliary_targets.items()},
+                    stage=episode.stage,
+                    success=episode.success,
+                    ignore=ignore,
+                )
+            )
+        return windows
+
+    def behaviour_cloning_loss(
+        self,
+        actor,
+        batch_episodes: int,
+        idle_weight: float,
+        device: torch.device | str,
+        window: int = 0,
+    ) -> torch.Tensor:
+        """BC term used during PPO: whole episodes, or random windows of ``window`` steps.
+
+        A window starting mid-episode begins from a zero recurrent state, so its
+        first quarter (at most 32 steps) only warms the GRU up and carries no loss.
+        """
+        if window > 0:
+            episodes = self.sample_windows(batch_episodes, window, min(32, window // 4))
+        else:
+            episodes = self.sample(batch_episodes)
+        bc_loss, _, _ = self.losses(actor, self.batch(episodes, idle_weight, device))
         return bc_loss

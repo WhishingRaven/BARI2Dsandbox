@@ -60,7 +60,7 @@ def main() -> None:
         "--stages", type=int, nargs="+",
         help="curriculum stages to demonstrate, in turn; repeat one to weight it (default: training.demo_stages or 1..curriculum_max_stage)",
     )
-    parser.add_argument("--epsilon", type=float, default=0.1, help="probability of a random executed action per robot and step")
+    parser.add_argument("--epsilon", type=float, help="probability of a random executed action of the moving robot (default: training.demo_epsilon)")
     parser.add_argument("--workers", type=int, default=min(4, os.cpu_count() or 1), help="processes for demonstration generation")
     parser.add_argument("--demos", help="demonstration file (default: training.demo_path or <output_dir>/demos.pt)")
     parser.add_argument("--reuse-demos", action="store_true", help="load --demos instead of generating new ones")
@@ -81,6 +81,7 @@ def main() -> None:
     output = Path(arguments.output or output_dir / "bc_pretrain.pt")
     stages = arguments.stages or list(training.demo_stages) or list(range(1, training.curriculum_max_stage + 1))
     episode_count = arguments.episodes or training.demo_episodes or 240
+    epsilon = training.demo_epsilon if arguments.epsilon is None else arguments.epsilon
     random.seed(arguments.seed)
     torch.manual_seed(arguments.seed)
 
@@ -91,7 +92,7 @@ def main() -> None:
     else:
         print(f"Generating {episode_count} teacher episodes over stages {stages} with {arguments.workers} worker(s)...", flush=True)
         episodes = generate_demonstrations(
-            config.environment, stages, episode_count, arguments.epsilon, arguments.seed, arguments.workers, progress=True
+            config.environment, stages, episode_count, epsilon, arguments.seed, arguments.workers, progress=True
         )
         demonstrations = DemonstrationSet(episodes)
         demonstrations.save(demo_path)

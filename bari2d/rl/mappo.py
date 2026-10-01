@@ -129,7 +129,7 @@ class MAPPO:
                 bc_loss = torch.zeros((), device=self.device)
                 if use_bc:
                     bc_loss = demonstrations.behaviour_cloning_loss(  # type: ignore[union-attr]
-                        self.actor, config.bc_batch_episodes, config.bc_idle_weight, self.device
+                        self.actor, config.bc_batch_episodes, config.bc_idle_weight, self.device, config.bc_window_steps
                     )
                     actor_loss = actor_loss + bc_coef * bc_loss
                 self.actor_optimizer.zero_grad()

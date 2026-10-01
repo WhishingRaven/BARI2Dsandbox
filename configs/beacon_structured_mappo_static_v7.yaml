@@ -1,0 +1,127 @@
+# v7 = v6 with 10 robots and a task in which stages 5-7 need a reinforced
+# (two-row) bridge.
+#
+# v6 (update 660) reached stage 4 at update 393 with ~25% success there (v5:
+# ~5%); far-from-edge grips were gone.  Remaining failures: nobody climbs onto
+# the root (56%); several robots gripping the edge side by side.  Side-by-side
+# roots are only useful if each starts its own row, and with the v6 loads
+# (1-3) one row (capacity ~14-15) is always enough, so reinforcement never
+# paid off.  Changes:
+#
+#   - robot.count 10.  The IR / cliff ray march is vectorised (identical
+#     readings), so a 10-robot step (~25 ms) is cheaper than a v6 5-robot step.
+#   - load.max_target 40 (capacity cap and goal normalisation; was 15) and
+#     curriculum_targets 20 for stages 5-7: one row holds ~14-15 at gaps
+#     1.7 / 2.3 / 3.0, two rows ~28-30, so these stages need a second row
+#     (stage 7 also randomises anchor strength by +-20%: 1 row <= 17 < 20 <= 22.8).
+#     Anchor limits stay at 5: weaker anchors (<= 3) break the cantilever while
+#     a single row is being built over the 2.3 and 3.0 gaps.
+#   - max_steps 1200: the teacher builds two rows in ~350-600 steps (1.7),
+#     ~500 (2.3) and ~500-600 (3.0); with demo_epsilon 0.05 perturbations
+#     ~370-990 steps, and some stage 6-7 demonstrations run out of time.
+#   - reward.climb_counts_extended + climb_cap 8: a robot that climbed and then
+#     gripped end-to-end over the gap keeps its climb reward (no give-back on
+#     extension); every link of either row is worth climb_delta once.
+#   - entropy_coef 0.03 (v6 entropy stayed at ~0.1).
+#   - The teacher builds a second row beside the first when the first spans but
+#     the capacity is below the target, and two helpers queue behind the root
+#     while a robot climbs or walks out.  Demonstrations are regenerated
+#     (300 over stages [1, 2, 3, 3, 4, 4, 4, 5, 5, 6, 6, 7]); during PPO the BC
+#     term uses random 256-step windows of 8 demonstrations (bc_window_steps).
+#   - The static model also lets a robot standing across the root-to-link joint
+#     raise the capacity (about +50% over 2.3 and 3.0), so a single row plus a
+#     robot on top can sometimes reach 20 too.  Both count as reinforcement here.
+#
+#   python scripts/pretrain_bc.py --config configs/beacon_structured_mappo_static_v7.yaml --eval-episodes 5
+#   python scripts/train.py --config configs/beacon_structured_mappo_static_v7.yaml --pretrained runs/beacon_structured_mappo_static_v7/bc_pretrain.pt
+environment:
+  seed: 7
+  curriculum_stage: 1
+  max_steps: 1200
+  latent_sigma: 0.0
+  start_setups: [walker_on_root, walker_behind_root, root_only, none, none, none, none]
+  spawn_edge_distance: [2.5, 2.5, 2.5, 2.5, 3.5, 5.0, 0.0]
+  randomization_stage: 7
+  robot:
+    count: 10
+  sensor:
+    structure_cues: true
+    downward_ir_offset: 0.21
+  gap:
+    width_min: 1.2
+    width_max: 3.0
+    curriculum_widths: [1.2, 1.2, 1.2, 1.2, 1.7, 2.3, 3.0]
+  load:
+    target_min: 1.0
+    target_max: 3.0
+    max_target: 40.0
+    curriculum_targets: [1.0, 1.0, 1.0, 1.0, 20.0, 20.0, 20.0]
+  contact:
+    anchor_requires_edge_or_contact: true
+    anchor_edge_band: 1.2
+    anchor_rule: front_downward_ir
+  physics:
+    model: static
+    gravity: 1.0
+    anchor_bending_limit: 5.0
+    anchor_torsion_limit: 5.0
+    extend_on_anchor: true
+    ground_contact_max_layer: 1
+  beacon:
+    enabled: true
+    communication_range: 2.5
+    max_hops: 4
+  reward:
+    progress_measure: anchored_frontier
+    progress_baseline: 0.9
+    climb_delta: 0.8
+    climb_cap: 8
+    climb_counts_extended: true
+    span_delta: 4.0
+    mechanical_delta: 3.0
+    time_penalty: 0.002
+    energy_penalty: 0.002
+    anchor_penalty: 0.01
+    robot_use_penalty: 0.002
+    collapse_penalty: 0.5
+    success_reward: 30.0
+    beacon_discovery_reward: 0.5
+    beacon_gather_delta: 0.5
+    idle_penalty: 0.0005
+    idle_grace_steps: 5
+model:
+  architecture: structured_mappo
+  branch_hidden: 48
+  fused_hidden: 64
+  recurrent_hidden: 64
+  film: true
+  use_heterogeneity: false
+  connectivity_inputs: ir_strain_action_cue
+training:
+  total_updates: 1500
+  rollout_steps: 128
+  num_envs: 8
+  vector_env: subprocess
+  recurrent_chunk: 32
+  num_minibatches: 4
+  ppo_epochs: 4
+  learning_rate: 0.0003
+  entropy_coef: 0.03
+  auxiliary_coef: 0.1
+  critic: graph
+  critic_agent_conditioned: true
+  critic_warmup_updates: 10
+  bootstrap_truncation: true
+  curriculum_max_stage: 7
+  checkpoint_interval: 50
+  demo_path: runs/beacon_structured_mappo_static_v7/demos.pt
+  bc_coef: 0.5
+  bc_coef_final: 0.05
+  bc_decay_updates: 300
+  bc_batch_episodes: 8
+  bc_window_steps: 256
+  bc_idle_weight: 0.2
+  demo_episodes: 300
+  demo_stages: [1, 2, 3, 3, 4, 4, 4, 5, 5, 6, 6, 7]
+  demo_epsilon: 0.05
+  output_dir: runs/beacon_structured_mappo_static_v7

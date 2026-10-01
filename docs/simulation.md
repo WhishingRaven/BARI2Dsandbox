@@ -118,4 +118,4 @@
 
 **로컬 구조 cue (`sensor.structure_cues`).** 켜면 관측에 두 값이 붙는다. (1) 바로 앞(올라탈 수 있는 거리)의 같은 층 로봇이 고정돼 있는지, (2) 내가 밟고 있는 아래층 로봇이 고정돼 있는지. 둘 다 접촉이나 근거리 신호로 알 수 있는 로컬 정보다. 끄면 관측 크기가 그대로라 이전 체크포인트와 호환된다.
 
-**올라서기 보상 (`reward.climb_delta`, `climb_cap`).** 고정된 로봇 위에 서 있는 로봇 수(최대 `climb_cap`)를 potential로 쓴다. 내려오거나 연장으로 끝과 끝을 맞대면 되돌려진다. 에피소드 로그의 `structure`에는 둑을 잡은 로봇(`edge_grips`), 고정된 로봇 위에 선 로봇(`on_structure`), 틈 위로 연장된 로봇(`extended`) 수가 기록되고 `plot_training.py`가 이를 그린다.
+**올라서기 보상 (`reward.climb_delta`, `climb_cap`).** 고정된 로봇 위에 서 있는 로봇 수(최대 `climb_cap`)를 potential로 쓴다. 내려오거나 연장으로 끝과 끝을 맞대면 되돌려진다. `climb_counts_extended`를 켜면(v7) 틈 위에서 끝과 끝을 맞댄 로봇도 함께 세므로, 연장할 때는 되돌려지지 않고 떨어지거나 놓을 때만 되돌려진다. 에피소드 로그의 `structure`에는 둑을 잡은 로봇(`edge_grips`), 고정된 로봇 위에 선 로봇(`on_structure`), 틈 위로 연장된 로봇(`extended`) 수가 기록되고 `plot_training.py`가 이를 그린다.

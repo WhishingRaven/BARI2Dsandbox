@@ -533,18 +533,23 @@ class BridgeEnv:
 
     def _climb_potential(self) -> float:
         standing = sum(self._robot_below_anchored(robot) for robot in self.robots)
+        if self.config.reward.climb_counts_extended:
+            standing += sum(self._extended(robot) for robot in self.robots)
         return float(min(standing, max(self.config.reward.climb_cap, 0)))
+
+    def _extended(self, robot: RobotState) -> bool:
+        """A ground-level robot gripping another robot end-to-end over the gap (a chain link)."""
+        return bool(
+            robot.anchored and isinstance(robot.anchor_partner, int) and robot.layer == 0 and not robot.fallen
+            and self.field.is_gap(robot.position)
+        )
 
     def structure_metrics(self) -> dict[str, int]:
         """Counts for logging the construction steps."""
         return {
             "edge_grips": sum(r.anchored and r.anchor_partner == LEFT_BANK and not r.fallen for r in self.robots),
             "on_structure": sum(self._robot_below_anchored(r) for r in self.robots),
-            "extended": sum(
-                r.anchored and isinstance(r.anchor_partner, int) and r.layer == 0 and not r.fallen
-                and self.field.is_gap(r.position)
-                for r in self.robots
-            ),
+            "extended": sum(self._extended(r) for r in self.robots),
         }
 
     def _structure_spans(self) -> bool:

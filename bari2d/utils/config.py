@@ -132,6 +132,10 @@ class RewardConfig:
     # ``climb_cap`` count); stepping down again gives it back.
     climb_delta: float = 0.0
     climb_cap: int = 1
+    # Also count robots that climbed and then gripped end-to-end over the gap
+    # (structure_metrics "extended"), so extending the chain no longer gives
+    # the climb reward back.  It is still returned if the robot falls or lets go.
+    climb_counts_extended: bool = False
 
 
 @dataclass
@@ -271,11 +275,17 @@ class TrainingConfig:
     bc_coef_final: float = 0.0
     bc_decay_updates: int = 0
     bc_batch_episodes: int = 4
+    # Steps per demonstration sampled for the PPO-time BC term (0 = whole
+    # episodes).  Long multi-row episodes are cut into random windows.
+    bc_window_steps: int = 0
     # Demonstrations written by scripts/pretrain_bc.py: episodes spread over
     # demo_stages in order (repeat a stage to weight it; empty = every stage
     # up to curriculum_max_stage once).  0 episodes = the script default (240).
     demo_episodes: int = 0
     demo_stages: list[int] = field(default_factory=list)
+    # Probability of a random executed action for the robot the teacher moves
+    # (waiting robots: a quarter of it).  The label stays the teacher's action.
+    demo_epsilon: float = 0.1
     # Weight of IDLE labels given to robots the teacher is not moving (most
     # labels), so behaviour cloning does not collapse onto IDLE.
     bc_idle_weight: float = 0.2
