@@ -173,6 +173,13 @@ class PhysicsConfig:
     # over a bank.  Layer 1 covers the tilted climbing pose (rear wheels on the
     # ground, front on another robot) that the 2.5D layers cannot draw.
     ground_contact_max_layer: int = 1
+    # Splice grip: a robot gripping while it stands on the deck holds with its
+    # spines on every robot below it that it overlaps by at least
+    # ``splice_min_overlap`` of its footprint, not only on its main partner.
+    # Lying across the joint of two chain links it then adds a parallel joint
+    # path (a doubler plate) to that joint.
+    splice_grip: bool = False
+    splice_min_overlap: float = 0.15
 
 
 @dataclass
@@ -286,6 +293,9 @@ class TrainingConfig:
     # Probability of a random executed action for the robot the teacher moves
     # (waiting robots: a quarter of it).  The label stays the teacher's action.
     demo_epsilon: float = 0.1
+    # Share of demonstrations whose teacher reinforces by splicing over the
+    # root joint before adding rows (needs environment.physics.splice_grip).
+    demo_splice_share: float = 0.0
     # Weight of IDLE labels given to robots the teacher is not moving (most
     # labels), so behaviour cloning does not collapse onto IDLE.
     bc_idle_weight: float = 0.2

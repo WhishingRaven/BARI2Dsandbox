@@ -240,4 +240,28 @@ def build_structure(
                 torsion_limit,
             )
         )
+    if physics.splice_grip:
+        footprint_area = robot_config.length * robot_config.width
+        for owner_id, anchor in contact_model.anchors.items():
+            owner = robots[owner_id]
+            if owner_id not in bodies or owner.layer < 1 or not isinstance(anchor.partner, int):
+                continue
+            for other in active:
+                if other.robot_id in (owner_id, anchor.partner) or other.layer != owner.layer - 1:
+                    continue
+                overlap = statics.clip_convex(corners[owner_id], corners[other.robot_id])
+                area = abs(statics.polygon_area(overlap))
+                if area < physics.splice_min_overlap * footprint_area:
+                    continue
+                joints.append(
+                    statics.Joint(
+                        owner_id,
+                        other.robot_id,
+                        np.asarray(polygon_centroid(overlap), dtype=float),
+                        np.asarray(other.heading, dtype=float),
+                        vertical_limit,
+                        bending_limit,
+                        torsion_limit,
+                    )
+                )
     return statics.StaticStructure(bodies, patches, joints)

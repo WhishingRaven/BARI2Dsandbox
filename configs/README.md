@@ -21,6 +21,7 @@
 | beacon_structured_mappo_static_v5.yaml | structured_mappo | graph (로봇별 가치) | v4 과제 + 교사 시연 BC 사전학습, 로봇별 가치, 확장 connectivity 입력, nn.GRU 시퀀스 학습, 병렬 환경 8개 (docs/accelerated_training.md) |
 | beacon_structured_mappo_static_v6.yaml | structured_mappo | graph (로봇별 가치) | v5 + 설계와 같은 앞쪽 배 IR(0.21)·"앞발이 턱을 넘을 때만 둑 잡기" 규칙, BC 계수 0.05 유지, 3~5단계 위주 시연 300개 (docs/accelerated_training.md 6절) |
 | beacon_structured_mappo_static_v7.yaml | structured_mappo | graph (로봇별 가치) | v6 + 로봇 10대, 5~7단계 목표 20(1줄 14~15 < 20 ≤ 2줄 28~30, 보강 필요), max_steps 1200, 연장 시 climb 보상 유지, entropy 0.03, 2줄 짓는 교사 (docs/accelerated_training.md 7절) |
+| beacon_structured_mappo_static_v8.yaml | structured_mappo | graph (로봇별 가치) | v7 + 줄별 틈 가운데 하중(`row_midspan`), 덧댐 결합(`splice_grip`), 5~7단계 목표 18(1줄 12~15 < 18; 덧댐·2줄로 도달), entropy 0.015, 시연 절반은 덧댐 교사 (docs/accelerated_training.md 8절) |
 
 기본 Structured MAPPO를 학습한다.
 

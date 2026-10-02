@@ -55,6 +55,9 @@ class UniformLoadProtocol(LoadProtocol):
 LOAD_PROTOCOLS: dict[str, type[LoadProtocol]] = {
     "center_point": LoadProtocol,
     "uniform": UniformLoadProtocol,
+    # Static-physics protocol (statics.max_load); the legacy graph evaluator
+    # treats it as a centre-point load.
+    "row_midspan": LoadProtocol,
 }
 
 

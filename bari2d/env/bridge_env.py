@@ -647,8 +647,12 @@ class BridgeEnv:
         overloaded = set(outcome.broken_joints)
         for owner, partner in outcome.broken_joints + outcome.released_joints:
             anchor = self.contact_model.anchors.get(owner)
-            if anchor is None or anchor.partner != partner:
+            if anchor is None:
                 continue
+            if anchor.partner != partner and not self.config.physics.splice_grip:
+                continue
+            # With splice grips a joint to another robot below belongs to the
+            # same grip: when it gives way the robot lets go entirely.
             self.contact_model.release(self.robots[owner])
             if (owner, partner) in overloaded:
                 self.contact_model.anchor_failures += 1

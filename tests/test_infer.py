@@ -43,6 +43,26 @@ def test_inference_session_runs_policy_only_step(tmp_path: Path) -> None:
     assert session.last_prediction is not None
 
 
+def test_seed_fixes_stochastic_actions_and_the_preview_is_executed(tmp_path: Path) -> None:
+    checkpoint = _checkpoint(tmp_path / "model.pt")
+    loaded = load_inference_model(checkpoint, None, torch.device("cpu"))
+
+    def run() -> list[list[int]]:
+        session = InferenceSession(loaded, torch.device("cpu"), seed=5, deterministic=False)
+        executed = []
+        for _ in range(3):
+            preview = session.preview_prediction.actions.tolist()
+            torch.rand(7)  # unrelated use of the global RNG (e.g. plotting) must not matter
+            session.step()
+            assert session.last_prediction.actions.tolist() == preview
+            executed.append(preview)
+            if session.done:
+                break
+        return executed
+
+    assert run() == run()
+
+
 def test_legacy_checkpoint_config_keeps_its_original_sensor_layout() -> None:
     serialized = ExperimentConfig().to_dict()
     serialized["environment"]["sensor"].pop("downward_ir_enabled")

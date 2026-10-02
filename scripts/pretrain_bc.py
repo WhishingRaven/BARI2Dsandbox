@@ -92,7 +92,8 @@ def main() -> None:
     else:
         print(f"Generating {episode_count} teacher episodes over stages {stages} with {arguments.workers} worker(s)...", flush=True)
         episodes = generate_demonstrations(
-            config.environment, stages, episode_count, epsilon, arguments.seed, arguments.workers, progress=True
+            config.environment, stages, episode_count, epsilon, arguments.seed, arguments.workers, progress=True,
+            splice_share=training.demo_splice_share,
         )
         demonstrations = DemonstrationSet(episodes)
         demonstrations.save(demo_path)

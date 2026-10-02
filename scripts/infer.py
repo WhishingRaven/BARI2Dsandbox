@@ -179,6 +179,9 @@ class InferenceSession:
         if stage is not None:
             self.env.config.curriculum_stage = int(np.clip(stage, 1, max_curriculum_stage(self.env.config)))
         self.observation, self.info = self.env.reset(seed=self.seed)
+        # --seed fixes the start state *and* the sampled actions (--stochastic):
+        # a private generator, so redraws of the viewer do not shift the sequence.
+        self.generator = torch.Generator(device="cpu").manual_seed(int(self.seed))
         if target_load is not None:
             self.set_target_load(target_load, refresh=False)
         self.hidden = self.model.actor.initial_hidden(self.env.config.robot.count, self.device)
@@ -199,13 +202,13 @@ class InferenceSession:
     def predict(self) -> PolicyPrediction:
         observations = torch.as_tensor(self.observation, dtype=torch.float32, device=self.device)
         masks = torch.as_tensor(self.env.action_masks(), dtype=torch.bool, device=self.device)
-        actions, _, entropy, output = self.model.actor.act(
-            observations,
-            self.hidden,
-            masks,
-            deterministic=self.deterministic,
-        )
+        output = self.model.actor.forward_step(observations, self.hidden, masks)
         probabilities = torch.softmax(output.logits, dim=-1)
+        entropy = torch.distributions.Categorical(logits=output.logits).entropy()
+        if self.deterministic:
+            actions = output.logits.argmax(dim=-1)
+        else:
+            actions = torch.multinomial(probabilities.cpu(), 1, generator=self.generator).squeeze(-1).to(self.device)
         return PolicyPrediction(
             actions=actions.detach().cpu().numpy(),
             probabilities=probabilities.detach().cpu().numpy(),
@@ -216,7 +219,8 @@ class InferenceSession:
     def step(self) -> bool:
         if self.done:
             return False
-        prediction = self.predict()
+        # Execute the action shown as the preview (one sample per step).
+        prediction = self.preview_prediction if self.preview_prediction is not None else self.predict()
         self.last_prediction = prediction
         observations = torch.as_tensor(self.observation, dtype=torch.float32, device=self.device)
         masks = torch.as_tensor(self.env.action_masks(), dtype=torch.bool, device=self.device)

@@ -32,6 +32,7 @@ from bari2d.env.field import LEFT_BANK
 from bari2d.env.robot import DiscreteAction, RobotState
 
 IDLE = int(DiscreteAction.IDLE)
+REINFORCEMENTS = ("rows", "splice")
 
 
 def _wrap(angle: float) -> float:
@@ -40,9 +41,21 @@ def _wrap(angle: float) -> float:
 
 class ScriptedTeacher:
     def __init__(
-        self, env: BridgeEnv, staging_distance: float = 0.9, row_spacing: float | None = None, helpers: int = 2
+        self,
+        env: BridgeEnv,
+        staging_distance: float = 0.9,
+        row_spacing: float | None = None,
+        helpers: int = 2,
+        reinforcement: str = "rows",
     ):
+        if reinforcement not in REINFORCEMENTS:
+            raise ValueError(f"Unknown reinforcement: {reinforcement}")
         self.env = env
+        # How to strengthen a spanning bridge whose capacity is below the target:
+        # "rows" builds another row beside it; "splice" first lays a robot across
+        # the root-to-link joint and grips both (needs physics.splice_grip), then
+        # adds rows if that is still not enough.
+        self.reinforcement = reinforcement
         # Robots that queue behind the root of the row being built (0 = off).
         self.helpers = helpers
         self.staging_distance = staging_distance
@@ -187,10 +200,11 @@ class ScriptedTeacher:
         masks = env.action_masks()
         rows = self.chains()
         members = {robot_id for row in rows for robot_id in row}
+        splices = self.splices(rows)
         worker, action = None, IDLE
         stray = [
             robot for robot in env.robots
-            if self._usable(robot) and robot.anchored and robot.robot_id not in members
+            if self._usable(robot) and robot.anchored and robot.robot_id not in members | splices
         ]
         open_rows = [row for row in rows if not self.spans(row)]
         if stray:
@@ -217,13 +231,49 @@ class ScriptedTeacher:
                 if helper[1] != IDLE and masks[helper[0], helper[1]]:
                     actions[helper[0]] = helper[1]
         elif env.current_capacity < env.target_load:
-            worker, action = self._grip_edge(self._new_row_tangent(rows), members)
+            if self.reinforcement == "splice" and not self._root_spliced(rows[0]):
+                worker, action = self._splice(rows[0], members | splices)
+            else:
+                worker, action = self._grip_edge(self._new_row_tangent(rows), members | splices)
         if worker is not None:
             if not masks[worker, action]:
                 action = IDLE
             actions[worker] = action
         self.worker = worker
         return actions, worker
+
+    def splices(self, rows: list[list[int]]) -> set[int]:
+        """Robots gripping on top of a row (standing on the deck and anchored to a row member)."""
+        members = {robot_id for row in rows for robot_id in row}
+        return {
+            robot.robot_id for robot in self.env.robots
+            if self._usable(robot) and robot.anchored and robot.layer >= 1 and robot.anchor_partner in members
+        }
+
+    def _root_spliced(self, row: list[int]) -> bool:
+        if len(row) < 2:
+            return True  # nothing to splice
+        joint = {row[0], row[1]}
+        for robot_id in self.splices([row]):
+            robot = self.env.robots[robot_id]
+            touching = {
+                other for other in joint
+                if float(np.linalg.norm(robot.position - self.env.robots[other].position)) < self.env.config.robot.length
+            }
+            if touching == joint:
+                return True
+        return False
+
+    def _splice(self, row: list[int], busy: set[int]) -> tuple[int | None, int]:
+        """A robot climbs onto the root, walks until it lies across the root-to-link joint and grips."""
+        root = self.env.robots[row[0]]
+        rider = self._standing_on_chain(row)
+        if rider is None:
+            return self._join(row, busy)
+        along = float((rider.position - root.position) @ root.heading)
+        if along < 0.5 * self.env.config.robot.length - 0.05:
+            return rider.robot_id, int(DiscreteAction.FORWARD)
+        return rider.robot_id, int(DiscreteAction.ANCHOR)
 
     def _new_row_tangent(self, rows: list[list[int]]) -> float:
         """Lateral position of the next root: one row spacing beside the outermost root, on the side of the free robots."""

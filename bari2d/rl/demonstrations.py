@@ -51,7 +51,12 @@ class DemoEpisode:
 
 
 def record_episode(
-    config: EnvironmentConfig, stage: int, seed: int, epsilon: float = 0.1, idle_epsilon_scale: float = 0.25
+    config: EnvironmentConfig,
+    stage: int,
+    seed: int,
+    epsilon: float = 0.1,
+    idle_epsilon_scale: float = 0.25,
+    splice_share: float = 0.0,
 ) -> DemoEpisode:
     """Run the teacher once from the start state of ``stage``."""
     environment_config = deepcopy(config)
@@ -59,7 +64,9 @@ def record_episode(
     environment_config.seed = int(seed)
     env = BridgeEnv(environment_config)
     observation, _ = env.reset(seed=seed)
-    teacher = ScriptedTeacher(env)
+    # A share of the episodes reinforce by splicing over the root joint, the rest by extra rows.
+    reinforcement = "splice" if random.Random(seed).random() < splice_share else "rows"
+    teacher = ScriptedTeacher(env, reinforcement=reinforcement)
     rng = np.random.default_rng(seed + 7919)
     observations, labels, masks, active = [], [], [], []
     auxiliary = {name: [] for name in AUXILIARY_TARGETS}
@@ -101,7 +108,7 @@ def record_episode(
     )
 
 
-def _record_task(arguments: tuple[EnvironmentConfig, int, int, float, float]) -> DemoEpisode:
+def _record_task(arguments: tuple[EnvironmentConfig, int, int, float, float, float]) -> DemoEpisode:
     return record_episode(*arguments)
 
 
@@ -114,9 +121,13 @@ def generate_demonstrations(
     workers: int = 1,
     progress: bool = False,
     idle_epsilon_scale: float = 0.25,
+    splice_share: float = 0.0,
 ) -> list[DemoEpisode]:
     """``episodes`` teacher episodes, stage ``stages[i % len(stages)]`` for episode i (parallel when workers > 1)."""
-    tasks = [(config, stages[index % len(stages)], seed + index, epsilon, idle_epsilon_scale) for index in range(episodes)]
+    tasks = [
+        (config, stages[index % len(stages)], seed + index, epsilon, idle_epsilon_scale, splice_share)
+        for index in range(episodes)
+    ]
     report_every = max(len(tasks) // 10, 1)
     results: list[DemoEpisode] = []
 

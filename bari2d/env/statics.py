@@ -587,7 +587,14 @@ def stabilize(structure: StaticStructure, max_iterations: int | None = None) -> 
 
 
 def max_load(structure: StaticStructure, protocol: str = "uniform", maximum_load: float = 15.0) -> CapacityOutcome:
-    """Largest external load the bank-to-bank structure carries in equilibrium."""
+    """Largest external load the bank-to-bank structure carries in equilibrium.
+
+    Protocols: ``uniform`` shares the load equally among all bodies over the
+    gap (so more bodies over the gap carry more in total), ``center_point``
+    puts it on the body nearest mid-gap, ``row_midspan`` splits it equally
+    among the spanning components and puts each share on that component's
+    body nearest mid-gap.
+    """
     spanning = [
         component
         for component in structure.components()
@@ -602,6 +609,16 @@ def max_load(structure: StaticStructure, protocol: str = "uniform", maximum_load
 
     if protocol == "center_point":
         load_bodies = [min(bodies, key=midline_distance)]
+    elif protocol == "row_midspan":
+        # The load is shared equally by the spanning rows (bank-to-bank
+        # components) and acts at mid-gap on each row's deck (robots that do
+        # not stand on another robot): independent of how many robots lie over
+        # the gap, of the row's angle and of robots stacked on top.
+        stacked = {patch.upper for patch in structure.patches if isinstance(patch.lower, int)}
+        load_bodies = [
+            min([robot_id for robot_id in component if robot_id not in stacked] or list(component), key=midline_distance)
+            for component in spanning
+        ]
     else:
         load_bodies = [robot_id for robot_id in bodies if structure.bodies[robot_id].over_gap]
         if not load_bodies:
