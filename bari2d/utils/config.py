@@ -136,6 +136,12 @@ class RewardConfig:
     # (structure_metrics "extended"), so extending the chain no longer gives
     # the climb reward back.  It is still returned if the robot falls or lets go.
     climb_counts_extended: bool = False
+    # With climb_counts_extended: at most this many robots merely *standing*
+    # on the structure count (-1 = no separate cap, standing and extended
+    # robots share climb_cap as in v7/v8).  v9 uses 1: one robot standing on
+    # the root earns the climb reward, further ones only crowd the deck, while
+    # extended links count up to climb_cap.
+    climb_standing_cap: int = -1
 
 
 @dataclass

@@ -16,7 +16,7 @@ from bari2d.env.statics import max_load, stabilize
 from bari2d.utils.config import BEACON_FEATURE_SIZE, EnvironmentConfig
 
 
-START_SETUPS = ("none", "root_only", "walker_behind_root", "walker_on_root")
+START_SETUPS = ("none", "root_only", "walker_behind_root", "walker_on_root", "row_spanning")
 ANCHOR_RULES = ("edge_band", "front_downward_ir")
 CUE_SIZE = 2
 
@@ -139,8 +139,17 @@ class BridgeEnv:
         self.target_load = self._sample_target_load()
         self.robots = self._initial_robots()
         self.contact_model.reset()
-        if self._start_setup() != "none":
+        setup = self._start_setup()
+        if setup != "none":
             self.contact_model.anchor(self.robots[0], self.robots, self.field)
+        if setup == "row_spanning":
+            # Grip every further link of the prepared row to the one behind it.
+            attach = getattr(self.contact_model, "_attach", None)
+            for robot in self.robots[1 : self._prepared_row_length]:
+                if attach is not None:
+                    attach(robot, robot.robot_id - 1, self.robots)
+                else:
+                    self.contact_model.anchor(robot, self.robots, self.field)
         self.graph = self.contact_model.build_graph(self.robots, self.field, self.rng)
         self.step_count = 0
         self.phase = "construction"
@@ -230,6 +239,7 @@ class BridgeEnv:
 
     def _prepared_robots(self, setup: str) -> list[RobotState]:
         """Robots placed for a start-state curriculum stage (anchoring happens in reset)."""
+        self._prepared_row_length = 0
         if setup == "none":
             return []
         length = self.config.robot.length
@@ -239,6 +249,15 @@ class BridgeEnv:
         left, _ = self.field.boundaries(tangent)
         root_position = self.field.center + self.field.normal * (left - 0.05) + self.field.tangent * tangent
         robots = [RobotState(0, root_position.astype(float), heading)]
+        if setup == "row_spanning":
+            # A straight single row from the root across the gap, resting at
+            # least 0.05 on the far bank (as scripted.assemble_static_chain).
+            _, right = self.field.boundaries(tangent)
+            root_front = left - 0.05 + length / 2.0
+            links = int(np.ceil(max(right + 0.05 - root_front, 0.0) / length))
+            for link in range(1, links + 1):
+                robots.append(RobotState(link, (root_position + self.field.normal * length * link).astype(float), heading))
+            self._prepared_row_length = len(robots)
         if setup == "walker_behind_root":
             robots.append(RobotState(1, (root_position - self.field.normal * (length + 0.02)).astype(float), heading))
         elif setup == "walker_on_root":
@@ -532,10 +551,15 @@ class BridgeEnv:
         )
 
     def _climb_potential(self) -> float:
+        reward_config = self.config.reward
+        cap = max(reward_config.climb_cap, 0)
         standing = sum(self._robot_below_anchored(robot) for robot in self.robots)
-        if self.config.reward.climb_counts_extended:
-            standing += sum(self._extended(robot) for robot in self.robots)
-        return float(min(standing, max(self.config.reward.climb_cap, 0)))
+        if reward_config.climb_counts_extended:
+            extended = sum(self._extended(robot) for robot in self.robots)
+            if reward_config.climb_standing_cap >= 0:
+                return float(min(standing, reward_config.climb_standing_cap) + min(extended, cap))
+            standing += extended
+        return float(min(standing, cap))
 
     def _extended(self, robot: RobotState) -> bool:
         """A ground-level robot gripping another robot end-to-end over the gap (a chain link)."""

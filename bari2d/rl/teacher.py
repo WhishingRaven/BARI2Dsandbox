@@ -61,8 +61,9 @@ class ScriptedTeacher:
         self.staging_distance = staging_distance
         # Centre-to-centre distance between neighbouring rows.  Wider than the
         # 1.15 x width of scripted.assemble_static_chain: a root may end up a few
-        # degrees off the normal, and its row then drifts sideways link by link.
-        self.row_spacing = env.config.robot.width * 1.6 if row_spacing is None else row_spacing
+        # degrees off the normal, and its row then drifts sideways link by link
+        # (at 1.6 x width a drifting second row could block its own extension).
+        self.row_spacing = env.config.robot.width * 2.0 if row_spacing is None else row_spacing
         self.worker: int | None = None
 
     def reset(self) -> None:
@@ -243,8 +244,12 @@ class ScriptedTeacher:
         return actions, worker
 
     def splices(self, rows: list[list[int]]) -> set[int]:
-        """Robots gripping on top of a row (standing on the deck and anchored to a row member)."""
-        members = {robot_id for row in rows for robot_id in row}
+        """Robots gripping on top of a spanning row (standing on its deck, anchored to a member).
+
+        A robot gripping on top of a row that does not span yet is in the way of
+        the walkers and is treated as a stray grip (released).
+        """
+        members = {robot_id for row in rows if self.spans(row) for robot_id in row}
         return {
             robot.robot_id for robot in self.env.robots
             if self._usable(robot) and robot.anchored and robot.layer >= 1 and robot.anchor_partner in members
