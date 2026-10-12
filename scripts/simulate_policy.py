@@ -60,12 +60,19 @@ def top_grips(env: BridgeEnv) -> int:
 
 
 class GifRecorder:
-    """Draws the gap region every ``every`` steps and writes an animated GIF."""
+    """Draws the gap region every ``every`` steps and writes an animated GIF.
+
+    The layout is fixed once (no per-frame tight_layout) and every frame shares
+    one colour palette, so the picture does not jump or flicker between frames.
+    """
 
     def __init__(self, env: BridgeEnv, label: str, seed: int, every: int, max_frames: int):
         self.env, self.label, self.seed = env, label, seed
         self.every, self.max_frames = max(every, 1), max_frames
-        self.figure, self.axis = plt.subplots(figsize=(7.2, 6.0))
+        self.figure, self.axis = plt.subplots(figsize=(7.2, 6.4))
+        self.figure.subplots_adjust(left=0.09, right=0.97, top=0.87, bottom=0.12)
+        # Action counts live in the figure (below the axes) so long lines never move the plot.
+        self.action_text = self.figure.text(0.02, 0.015, "", fontsize=8, va="bottom")
         self.frames: list[np.ndarray] = []
 
     def snap(self, actions: np.ndarray | None, info: dict | None, force: bool = False) -> None:
@@ -86,15 +93,14 @@ class GifRecorder:
             f"fallen {sum(robot.fallen for robot in env.robots)}  capacity {env.current_capacity:.1f}/{env.target_load:.0f}",
             fontsize=9,
         )
+        summary = ""
         if actions is not None:
             names, counts = np.unique([ACTION_NAMES[action] for action in actions], return_counts=True)
-            summary = " | ".join(f"{name} {count}" for name, count in zip(names, counts))
-            self.axis.text(0.01, 0.01, summary, transform=self.axis.transAxes, fontsize=8,
-                           bbox={"facecolor": "white", "alpha": 0.8, "edgecolor": "none"})
+            summary = "actions: " + " | ".join(f"{name} {count}" for name, count in zip(names, counts))
+        self.action_text.set_text(summary)
         if info and info.get("success"):
             self.axis.text(0.5, 0.95, "SUCCESS", transform=self.axis.transAxes, ha="center",
                            fontsize=14, color="#1a9850", weight="bold")
-        self.figure.tight_layout()
         self.figure.canvas.draw()
         self.frames.append(np.asarray(self.figure.canvas.buffer_rgba())[..., :3].copy())
 
@@ -105,7 +111,13 @@ class GifRecorder:
         frames = self.frames + [self.frames[-1]] * 8  # hold the last frame
         if len(frames) > self.max_frames:  # keep the start and the end
             frames = frames[: self.max_frames // 2] + frames[-(self.max_frames - self.max_frames // 2):]
-        images = [Image.fromarray(frame).convert("P", palette=Image.ADAPTIVE, colors=128) for frame in frames]
+        # One palette for the whole GIF, built from frames spread over the episode
+        # (per-frame palettes make the background colours flicker).
+        median_cut = getattr(getattr(Image, "Quantize", None), "MEDIANCUT", 0)
+        no_dither = getattr(getattr(Image, "Dither", None), "NONE", 0)
+        samples = frames[:: max(1, len(frames) // 12)]
+        palette = Image.fromarray(np.concatenate(samples, axis=0)).quantize(colors=255, method=median_cut)
+        images = [Image.fromarray(frame).quantize(palette=palette, dither=no_dither) for frame in frames]
         path.parent.mkdir(parents=True, exist_ok=True)
         images[0].save(path, save_all=True, append_images=images[1:], duration=110, loop=0, optimize=True)
         Image.fromarray(frames[-1]).save(path.with_suffix(".png"))

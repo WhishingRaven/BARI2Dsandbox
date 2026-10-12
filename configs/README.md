@@ -23,6 +23,7 @@
 | beacon_structured_mappo_static_v7.yaml | structured_mappo | graph (로봇별 가치) | v6 + 로봇 10대, 5~7단계 목표 20(1줄 14~15 < 20 ≤ 2줄 28~30, 보강 필요), max_steps 1200, 연장 시 climb 보상 유지, entropy 0.03, 2줄 짓는 교사 (docs/accelerated_training.md 7절) |
 | beacon_structured_mappo_static_v8.yaml | structured_mappo | graph (로봇별 가치) | v7 + 줄별 틈 가운데 하중(`row_midspan`), 덧댐 결합(`splice_grip`), 5~7단계 목표 18(1줄 12~15 < 18; 덧댐·2줄로 도달), entropy 0.015, 시연 절반은 덧댐 교사 (docs/accelerated_training.md 8절) |
 | beacon_structured_mappo_static_v9.yaml | structured_mappo | graph (로봇별 가치) | v8 + 서 있는 로봇의 climb 보상 1대 상한, 9단계 커리큘럼(1.7 한 줄 → 준비된 줄 보강(`row_spanning`) → 짓기+보강 → 2.3 → 3.0), 교사 줄 간격 2.0×폭 (docs/accelerated_training.md 9절) |
+| beacon_structured_mappo_static_v10.yaml | structured_mappo | graph (로봇별 가치) | v9 + 추락 벌점 0.5 → 2.0, v9 체크포인트 1500에서 `--resume`으로 이어서 3000까지 (docs/accelerated_training.md 10절) |
 
 기본 Structured MAPPO를 학습한다.
 

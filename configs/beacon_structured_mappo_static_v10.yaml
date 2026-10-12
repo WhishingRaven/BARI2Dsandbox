@@ -1,0 +1,118 @@
+# v10 = v9 continued from its final checkpoint with a stronger fall penalty.
+#
+# v9 (1500 updates) reached stage 7 (1.7 / 18 / empty start) at update 1357:
+# 9 / 121 successes, 8 / 37 in the last 35 updates.  Stage 7 asks for both a
+# span (about 40% at stage 5 and at stage 7 alike, so the target 18 does not
+# suppress spanning) and a splice after it (about one in three spans).
+# Audit of the final checkpoint at stage 7 (16 seeds): 3.2 robots fall and
+# 3.9 extra robots grip the bank per episode, so about 7 of the 10 robots
+# never join the bridge.  Falls:
+#   41%  a robot over the gap or holding others lets go (RELEASE) and the
+#        row beyond it drops with it
+#   29%  a robot standing on the structure walks off it
+#   16%  a robot walks off the bank edge after its front belly IR saw the cliff
+# A fall costs collapse_penalty per robot in the step it happens, so the
+# signal sits on the action that caused it.  At 0.5 a failed episode lost
+# about 1.7 to falls against a success reward of 30.
+# Changes (rewards only; no new action masks or rules):
+#   - reward.collapse_penalty 0.5 -> 2.0
+#   - total_updates 3000, output_dir runs/beacon_structured_mappo_static_v10
+#   - demo_path keeps the v9 demonstrations (BC floor 0.05 as before)
+#
+#   python scripts/train.py --config configs/beacon_structured_mappo_static_v10.yaml \
+#       --resume runs/beacon_structured_mappo_static_v9/checkpoint_001500.pt
+environment:
+  seed: 7
+  curriculum_stage: 1
+  max_steps: 1200
+  latent_sigma: 0.0
+  start_setups: [walker_on_root, walker_behind_root, root_only, none, none, row_spanning, none, none, none]
+  spawn_edge_distance: [2.5, 2.5, 2.5, 2.5, 3.5, 3.5, 3.5, 5.0, 0.0]
+  randomization_stage: 9
+  robot:
+    count: 10
+  sensor:
+    structure_cues: true
+    downward_ir_offset: 0.21
+  gap:
+    width_min: 1.2
+    width_max: 3.0
+    curriculum_widths: [1.2, 1.2, 1.2, 1.2, 1.7, 1.7, 1.7, 2.3, 3.0]
+  load:
+    target_min: 1.0
+    target_max: 3.0
+    max_target: 40.0
+    load_protocol: row_midspan
+    curriculum_targets: [1.0, 1.0, 1.0, 1.0, 1.0, 18.0, 18.0, 18.0, 18.0]
+  contact:
+    anchor_requires_edge_or_contact: true
+    anchor_edge_band: 1.2
+    anchor_rule: front_downward_ir
+  physics:
+    model: static
+    gravity: 1.0
+    anchor_bending_limit: 5.0
+    anchor_torsion_limit: 5.0
+    extend_on_anchor: true
+    ground_contact_max_layer: 1
+    splice_grip: true
+  beacon:
+    enabled: true
+    communication_range: 2.5
+    max_hops: 4
+  reward:
+    progress_measure: anchored_frontier
+    progress_baseline: 0.9
+    climb_delta: 0.8
+    climb_cap: 8
+    climb_counts_extended: true
+    climb_standing_cap: 1
+    span_delta: 4.0
+    mechanical_delta: 3.0
+    time_penalty: 0.002
+    energy_penalty: 0.002
+    anchor_penalty: 0.01
+    robot_use_penalty: 0.002
+    collapse_penalty: 2.0
+    success_reward: 30.0
+    beacon_discovery_reward: 0.5
+    beacon_gather_delta: 0.5
+    idle_penalty: 0.0005
+    idle_grace_steps: 5
+model:
+  architecture: structured_mappo
+  branch_hidden: 48
+  fused_hidden: 64
+  recurrent_hidden: 64
+  film: true
+  use_heterogeneity: false
+  connectivity_inputs: ir_strain_action_cue
+training:
+  total_updates: 3000
+  rollout_steps: 128
+  num_envs: 8
+  vector_env: subprocess
+  recurrent_chunk: 32
+  num_minibatches: 4
+  ppo_epochs: 4
+  learning_rate: 0.0003
+  entropy_coef: 0.015
+  auxiliary_coef: 0.1
+  critic: graph
+  critic_agent_conditioned: true
+  critic_warmup_updates: 10
+  bootstrap_truncation: true
+  curriculum_max_stage: 9
+  checkpoint_interval: 50
+  demo_path: runs/beacon_structured_mappo_static_v9/demos.pt
+  bc_coef: 0.5
+  bc_coef_final: 0.05
+  bc_decay_updates: 300
+  bc_batch_episodes: 8
+  bc_window_steps: 256
+  bc_idle_weight: 0.2
+  demo_episodes: 300
+  demo_stages: [1, 2, 3, 3, 4, 4, 4, 5, 5, 6, 6, 7, 7, 8, 9]
+  demo_epsilon: 0.05
+  demo_splice_share: 0.5
+  output_dir: runs/beacon_structured_mappo_static_v10

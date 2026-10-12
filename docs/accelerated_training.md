@@ -225,3 +225,32 @@ v8은 update 150에 1~4단계를 통과했지만, update 397까지 5단계(1.7 �
 
     python scripts/pretrain_bc.py --config configs/beacon_structured_mappo_static_v9.yaml --eval-episodes 5
     python scripts/train.py --config configs/beacon_structured_mappo_static_v9.yaml --pretrained runs/beacon_structured_mappo_static_v9/bc_pretrain.pt
+
+## 10. v10: v9 이어서 학습, 추락 벌점 강화
+
+`configs/beacon_structured_mappo_static_v10.yaml`
+
+v9는 1500 업데이트 동안 update 1357에 7단계(1.7 틈, 목표 18, 빈 상태 시작)에 들어갔다. 7단계 성공은 121번 중 9번이었고, 마지막 35 업데이트에서는 37번 중 8번이었다. 다음 단계로 가려면 최근 25번 중 70%가 성공해야 한다.
+
+마지막 체크포인트(1500)로 같은 seed 16개를 돌려 원인을 확인했다.
+
+- 목표 하중은 건너기에 영향이 없었다. 5단계(목표 1)와 7단계(목표 18) 모두 6/16만 건넜다.
+- 에피소드당 3.2대가 떨어지고, 첫 뿌리 말고도 3.9대가 둑을 더 잡았다. 10대 중 약 7대가 다리에 쓰이지 못한다.
+- 추락 원인:
+  - 41%: 틈 위에 있거나 다른 로봇을 매단 로봇이 RELEASE해서 그 앞의 줄이 함께 떨어짐
+  - 29%: 구조물 위에 선 로봇이 걸어 나가 떨어짐
+  - 16%: 앞쪽 배 IR이 낭떠러지를 본 뒤에도 둑 끝에서 걸어 나감
+- 로봇 수를 바꿔 같은 seed로 돌리면(재학습 없음) 성공이 7대 1/16, 10대 2/16, 14대 4/16이었다. 하지만 낭비되는 로봇의 비율(59%, 71%, 69%)은 거의 그대로였다.
+
+추락 벌점은 떨어진 스텝에 로봇 한 대당 매겨지므로 원인이 된 행동에 바로 붙는다. 0.5일 때는 실패한 에피소드에서 추락으로 잃는 보상이 약 1.7로, 성공 보상 30에 비해 너무 작았다.
+
+바꾼 것 (보상만 바꾸고, 행동 마스크나 규칙은 추가하지 않았다):
+
+- `reward.collapse_penalty`: 0.5 → 2.0
+- `training.total_updates`: 3000, `output_dir`: `runs/beacon_structured_mappo_static_v10`
+- 시연은 v9 것(`runs/beacon_structured_mappo_static_v9/demos.pt`)을 그대로 쓰고, BC 하한도 0.05 그대로다.
+- `tests/test_v10_resume.py`: v9와 다른 값은 위 세 가지뿐인지, 떨어진 스텝에 벌점이 2.0씩 붙는지, v9 체크포인트를 v10 설정으로 이어서 학습할 수 있는지 확인한다.
+
+실행 (v9 마지막 체크포인트에서 이어서, update 1501부터 3000까지 7단계에서 시작):
+
+    python scripts/train.py --config configs/beacon_structured_mappo_static_v10.yaml --resume runs/beacon_structured_mappo_static_v9/checkpoint_001500.pt
