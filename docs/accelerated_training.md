@@ -254,3 +254,42 @@ v9는 1500 업데이트 동안 update 1357에 7단계(1.7 틈, 목표 18, 빈 �
 실행 (v9 마지막 체크포인트에서 이어서, update 1501부터 3000까지 7단계에서 시작):
 
     python scripts/train.py --config configs/beacon_structured_mappo_static_v10.yaml --resume runs/beacon_structured_mappo_static_v9/checkpoint_001500.pt
+
+## 11. v11: 모듈 16대와 에피소드마다 다른 참여 대수
+
+`configs/beacon_structured_mappo_static_v11.yaml`
+
+v10(update 1501~3000, 추락 벌점 2.0)은 끝까지 7단계에 머물렀다. 1340번 중 142번 성공(11%)이었고, 오르는 추세가 없었다.
+
+- 추락은 에피소드당 3.1대에서 1.6대로 반이 됐다.
+- 대신 로봇들이 둑을 잡고 멈춰 있게 됐다. 둑을 잡은 로봇은 3.6대에서 4.4대로, 무언가를 잡고 고정된 로봇은 5.7대에서 7.3대로 늘었다.
+- 실패 1198번 중 831번이 뿌리에 한두 대만 이어진 채 끝났다.
+
+"둑은 몇 대까지" 같은 상한은 답의 모양을 정책에 알려주는 것과 같아서 쓰지 않는다. 대신 모듈을 넉넉히 두어, 많은 로봇이 탈락하거나 둑에 붙어 있어도 나머지가 다리를 완성하게 한다. 정책이 특정 팀 크기를 전제로 하지 못하도록 참여 대수도 에피소드마다 바꾼다.
+
+근거: v9 정책을 다시 학습하지 않고 로봇 수만 바꿔 같은 seed 16개로 7단계를 돌렸을 때, 성공이 7대 1/16, 10대 2/16, 14대 4/16이었다.
+
+바꾼 것:
+
+- `robot.count: 16`, `robot.active_min: 12`
+  - 에피소드마다 12~16대 중 무작위 대수만 참여한다.
+  - 나머지는 처음부터 빠진다. 떨어진 로봇처럼 취급되어 움직이지 않고, 감지되지 않고, 하중도 받지 않는다.
+  - 준비된 시작 상태(뿌리, 6단계의 줄)의 로봇은 항상 참여한다.
+  - `active_min: 0`(기본값)이면 모든 로봇이 참여하고 난수도 쓰지 않으므로 이전 설정의 결과는 그대로다.
+- `spawn_edge_distance`: `[4.0 ×4, 5.5 ×3, 7.5, 0]`
+  - 출발 밀도가 10대일 때와 같도록 구역 넓이를 1.6배로 했다.
+  - 멀리서 출발한 로봇은 늦게 도착하므로 시간차를 두고 합류한다.
+- `reward.collapse_penalty`: 2.0 → 0.5 (v9 값)
+- `training.total_updates`: 4500, `output_dir`: `runs/beacon_structured_mappo_static_v11`
+- 시연은 v9 것, BC 하한은 0.05 그대로다.
+- 기록:
+  - `episodes.jsonl`에 `active_robots`(참여 대수)가 추가된다.
+  - `fallen_robots`에는 빠진 로봇이 들어가지 않는다.
+  - `scripts/simulate_policy.py`는 제목과 결과에 참여 대수를 보여주고, 그림에서는 빠진 로봇을 그리지 않는다.
+- actor는 로봇 한 대의 관측만 보고 graph critic은 로봇마다 가치를 매기므로, 10대로 학습한 v10 가중치를 16대에서 그대로 이어 쓸 수 있다.
+- 비용: 스텝 계산이 10대보다 약 1.7배 느리다. v10이 업데이트당 약 20초였으므로 1500 업데이트에 약 14시간이다.
+- `tests/test_team_size.py`: 설정값, 참여 대수 범위(12~16), 빠진 로봇이 움직이거나 추락으로 세지지 않는지, 준비된 로봇은 항상 참여하는지, 기본값의 동작, 10대 v10 체크포인트를 16대 v11로 이어서 학습하는지 확인한다.
+
+실행 (v10 마지막 체크포인트에서 이어서, update 3001부터 4500까지 7단계에서 시작):
+
+    python scripts/train.py --config configs/beacon_structured_mappo_static_v11.yaml --resume runs/beacon_structured_mappo_static_v10/checkpoint_003000.pt

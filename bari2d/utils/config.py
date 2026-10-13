@@ -22,6 +22,10 @@ class RobotConfig:
     anchor_range: float = 1.05
     climb_height: float = 0.35
     max_layer: int = 10
+    # Team size per episode: a uniform number of robots in [active_min, count]
+    # takes part and the others are absent from the start (never act, sense or
+    # carry anything).  0 = all ``count`` robots in every episode.
+    active_min: int = 0
 
 
 @dataclass

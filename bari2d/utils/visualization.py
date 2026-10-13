@@ -58,6 +58,8 @@ def draw_environment(env: BridgeEnv, axis: plt.Axes | None = None) -> plt.Axes:
             axis.plot([first[0], second[0]], [first[1], second[1]], color="#ffd92f", linewidth=4.0, alpha=0.8)
 
     for robot in sorted(env.robots, key=lambda item: (item.layer, item.robot_id)):
+        if robot.absent:
+            continue  # not taking part in this episode
         layer_zorder = robot_layer_zorder(robot.layer)
         color = robot_layer_color(robot.layer, env.config.robot.max_layer)
         if robot.fallen:

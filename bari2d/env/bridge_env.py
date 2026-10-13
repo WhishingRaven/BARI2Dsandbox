@@ -87,6 +87,8 @@ class BridgeEnv:
             not self.config.sensor.downward_ir_enabled or self.config.sensor.downward_ir_offset <= 0.0
         ):
             raise ValueError("anchor_rule front_downward_ir needs the downward IR ahead of the centre (sensor.downward_ir_offset > 0)")
+        if not 0 <= self.config.robot.active_min <= self.config.robot.count:
+            raise ValueError("robot.active_min must be between 0 and robot.count")
         self._static_spans = False
         self.fast_evaluator = FastLoadEvaluator()
         self.accurate_evaluator = IncrementalLoadEvaluator(self.config.load)
@@ -220,13 +222,31 @@ class BridgeEnv:
         robots: list[RobotState] = self._prepared_robots(self._start_setup())[:count]
         for robot in robots:
             robot.latent = self.rng.normal(0.0, self.config.latent_sigma, size=self.config.latent_dim).astype(np.float32)
+        prepared = len(robots)
         for robot_id in range(len(robots), count):
             candidate = self._sample_initial_robot(robot_id, robots)
             candidate.latent = self.rng.normal(
                 0.0, self.config.latent_sigma, size=self.config.latent_dim
             ).astype(np.float32)
             robots.append(candidate)
+        self._remove_absent_robots(robots, prepared)
         return robots
+
+    def _remove_absent_robots(self, robots: list[RobotState], prepared: int) -> None:
+        """Team-size randomisation: only a random number of robots takes part.
+
+        Absent robots are marked fallen from the start, so they never act, are
+        not sensed and carry nothing; robots of a prepared start setup always
+        take part.  Draws nothing from the RNG when ``robot.active_min`` is 0.
+        """
+        count, active_min = len(robots), self.config.robot.active_min
+        if active_min <= 0 or active_min >= count:
+            return
+        active = int(self.rng.integers(max(active_min, prepared), count + 1))
+        absent = self.rng.choice(np.arange(prepared, count), size=count - active, replace=False)
+        for robot_id in absent:
+            robots[int(robot_id)].absent = True
+            robots[int(robot_id)].fallen = True
 
     def _start_setup(self) -> str:
         setups = self.config.start_setups
@@ -976,7 +996,8 @@ class BridgeEnv:
             "robots_used": len(self._used_robots),
             "energy": self._total_motion,
             "anchor_failures": self.contact_model.anchor_failures,
-            "fallen_robots": sum(robot.fallen for robot in self.robots),
+            "fallen_robots": sum(robot.fallen and not robot.absent for robot in self.robots),
+            "active_robots": sum(not robot.absent for robot in self.robots),
             "structure": self.structure_metrics(),
             "beacon": {
                 "active": self._beacon_source_id is not None,
@@ -995,6 +1016,7 @@ class BridgeEnv:
                     "anchored": robot.anchored,
                     "strain": robot.strain,
                     "fallen": robot.fallen,
+                    "absent": robot.absent,
                 }
                 for robot in self.robots
             ],

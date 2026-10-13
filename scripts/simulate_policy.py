@@ -59,6 +59,16 @@ def top_grips(env: BridgeEnv) -> int:
     return sum(1 for robot in env.robots if robot.anchored and robot.layer >= 1 and not robot.fallen)
 
 
+def fallen(env: BridgeEnv) -> int:
+    """Robots that fell (robots absent from the episode are not counted)."""
+    return int(sum(robot.fallen and not robot.absent for robot in env.robots))
+
+
+def active(env: BridgeEnv) -> int:
+    """Robots taking part in the episode (robot.active_min randomises this)."""
+    return int(sum(not robot.absent for robot in env.robots))
+
+
 class GifRecorder:
     """Draws the gap region every ``every`` steps and writes an animated GIF.
 
@@ -90,7 +100,7 @@ class GifRecorder:
             f"{self.label} | seed {self.seed}\n"
             f"step {env.step_count}  edge grips {metrics['edge_grips']}  on structure {metrics['on_structure']}  "
             f"extended {metrics['extended']}  top grips {top_grips(env)}  "
-            f"fallen {sum(robot.fallen for robot in env.robots)}  capacity {env.current_capacity:.1f}/{env.target_load:.0f}",
+            f"fallen {fallen(env)}  robots {active(env)}  capacity {env.current_capacity:.1f}/{env.target_load:.0f}",
             fontsize=9,
         )
         summary = ""
@@ -155,7 +165,8 @@ def run_episode(config: ExperimentConfig, actor: SharedRecurrentActor, seed: int
         "target": float(env.target_load),
         **env.structure_metrics(),
         "top_grips": top_grips(env),
-        "fallen": int(sum(robot.fallen for robot in env.robots)),
+        "fallen": fallen(env),
+        "robots": active(env),
     }
     return result, recorder
 

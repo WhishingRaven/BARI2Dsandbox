@@ -37,6 +37,8 @@ class RobotState:
     previous_action: int = int(DiscreteAction.IDLE)
     layer: int = 0
     fallen: bool = False
+    # Not taking part in this episode (team-size randomisation); also fallen.
+    absent: bool = False
     energy: float = 0.0
     anchor_partner: int | str | None = None
     recurrent_hidden: np.ndarray | None = None
