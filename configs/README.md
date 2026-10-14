@@ -25,6 +25,7 @@
 | beacon_structured_mappo_static_v9.yaml | structured_mappo | graph (로봇별 가치) | v8 + 서 있는 로봇의 climb 보상 1대 상한, 9단계 커리큘럼(1.7 한 줄 → 준비된 줄 보강(`row_spanning`) → 짓기+보강 → 2.3 → 3.0), 교사 줄 간격 2.0×폭 (docs/accelerated_training.md 9절) |
 | beacon_structured_mappo_static_v10.yaml | structured_mappo | graph (로봇별 가치) | v9 + 추락 벌점 0.5 → 2.0, v9 체크포인트 1500에서 `--resume`으로 이어서 3000까지 (docs/accelerated_training.md 10절) |
 | beacon_structured_mappo_static_v11.yaml | structured_mappo | graph (로봇별 가치) | v10 + 모듈 16대, 에피소드마다 12~16대만 참여(`robot.active_min`), 출발 구역 1.6배, 추락 벌점 0.5로 복귀, v10 체크포인트 3000에서 이어서 4500까지 (docs/accelerated_training.md 11절) |
+| beacon_structured_mappo_static_v12.yaml | structured_mappo | graph (로봇별 가치) | v11 + 2.3 틈을 건너기(목표 1) → 준비된 4대 줄 보강 → 짓기+보강으로 쪼갠 11단계 커리큘럼, max_steps 1500, v11 체크포인트 4500에서 이어서 6000까지 (docs/accelerated_training.md 12절) |
 
 기본 Structured MAPPO를 학습한다.
 

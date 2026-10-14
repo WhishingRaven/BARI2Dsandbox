@@ -1,0 +1,128 @@
+# v12 = v11 with the 2.3 m stage split like 1.7 and a 1500-step time limit.
+#
+# v11 passed stage 7 at update 3700 (stage-7 success 39%, 53% with 16 robots)
+# and reached 18% at stage 8 (2.3 / 18 / empty start) by update 4500.
+#   - 287 of 404 unspanned failures ended with a 3-robot row (the 1.7
+#     pattern), its tip a median 0.36 short of the far bank; 2.3 needs a
+#     4-robot row (root + 3 links).
+#   - 150 of 196 spanned failures had nobody gripping on top (single row,
+#     about 12); a root splice gives 19.5 at 2.3 (23 at 1.7), so the margin
+#     over 18 is small.
+#   - Successes took a median 694 steps, 90% within 1015 of 1200, with robots
+#     starting up to 7.5 from the edge.
+# v9 split 1.7 into span -> reinforce a prepared row -> both, which took the
+# stage from 0% (v8) to passing.  v12 does the same at 2.3:
+#   stage (gap / target / start)
+#     1-4   1.2 / 1  / walker_on_root, walker_behind_root, root_only, none
+#     5     1.7 / 1  / none
+#     6     1.7 / 18 / row_spanning
+#     7     1.7 / 18 / none
+#     8     2.3 / 1  / none           new: complete a 4-robot row
+#     9     2.3 / 18 / row_spanning   new: reinforce a prepared 4-robot row (12.1)
+#    10     2.3 / 18 / none           (v11 stage 8)
+#    11     3.0 / 18 / none, physics randomisation (v11 stage 9)
+# Other changes:
+#   - max_steps 1200 -> 1500 (only the time limit; nothing observed depends on it)
+#   - total_updates 6000, output_dir runs/beacon_structured_mappo_static_v12
+#   - demo_stages renumbered for the 11 stages (only used if demos are
+#     regenerated; the run keeps the v9 demonstrations, BC floor 0.05)
+# The v11 checkpoint 4500 is at stage 8, which here is the new 2.3 / 1 stage.
+#
+#   python scripts/train.py --config configs/beacon_structured_mappo_static_v12.yaml \
+#       --resume runs/beacon_structured_mappo_static_v11/checkpoint_004500.pt
+environment:
+  seed: 7
+  curriculum_stage: 1
+  max_steps: 1500
+  latent_sigma: 0.0
+  start_setups: [walker_on_root, walker_behind_root, root_only, none, none, row_spanning, none, none, row_spanning, none, none]
+  spawn_edge_distance: [4.0, 4.0, 4.0, 4.0, 5.5, 5.5, 5.5, 7.5, 7.5, 7.5, 0.0]
+  randomization_stage: 11
+  robot:
+    count: 16
+    active_min: 12
+  sensor:
+    structure_cues: true
+    downward_ir_offset: 0.21
+  gap:
+    width_min: 1.2
+    width_max: 3.0
+    curriculum_widths: [1.2, 1.2, 1.2, 1.2, 1.7, 1.7, 1.7, 2.3, 2.3, 2.3, 3.0]
+  load:
+    target_min: 1.0
+    target_max: 3.0
+    max_target: 40.0
+    load_protocol: row_midspan
+    curriculum_targets: [1.0, 1.0, 1.0, 1.0, 1.0, 18.0, 18.0, 1.0, 18.0, 18.0, 18.0]
+  contact:
+    anchor_requires_edge_or_contact: true
+    anchor_edge_band: 1.2
+    anchor_rule: front_downward_ir
+  physics:
+    model: static
+    gravity: 1.0
+    anchor_bending_limit: 5.0
+    anchor_torsion_limit: 5.0
+    extend_on_anchor: true
+    ground_contact_max_layer: 1
+    splice_grip: true
+  beacon:
+    enabled: true
+    communication_range: 2.5
+    max_hops: 4
+  reward:
+    progress_measure: anchored_frontier
+    progress_baseline: 0.9
+    climb_delta: 0.8
+    climb_cap: 8
+    climb_counts_extended: true
+    climb_standing_cap: 1
+    span_delta: 4.0
+    mechanical_delta: 3.0
+    time_penalty: 0.002
+    energy_penalty: 0.002
+    anchor_penalty: 0.01
+    robot_use_penalty: 0.002
+    collapse_penalty: 0.5
+    success_reward: 30.0
+    beacon_discovery_reward: 0.5
+    beacon_gather_delta: 0.5
+    idle_penalty: 0.0005
+    idle_grace_steps: 5
+model:
+  architecture: structured_mappo
+  branch_hidden: 48
+  fused_hidden: 64
+  recurrent_hidden: 64
+  film: true
+  use_heterogeneity: false
+  connectivity_inputs: ir_strain_action_cue
+training:
+  total_updates: 6000
+  rollout_steps: 128
+  num_envs: 8
+  vector_env: subprocess
+  recurrent_chunk: 32
+  num_minibatches: 4
+  ppo_epochs: 4
+  learning_rate: 0.0003
+  entropy_coef: 0.015
+  auxiliary_coef: 0.1
+  critic: graph
+  critic_agent_conditioned: true
+  critic_warmup_updates: 10
+  bootstrap_truncation: true
+  curriculum_max_stage: 11
+  checkpoint_interval: 50
+  demo_path: runs/beacon_structured_mappo_static_v9/demos.pt
+  bc_coef: 0.5
+  bc_coef_final: 0.05
+  bc_decay_updates: 300
+  bc_batch_episodes: 8
+  bc_window_steps: 256
+  bc_idle_weight: 0.2
+  demo_episodes: 300
+  demo_stages: [1, 2, 3, 3, 4, 4, 4, 5, 5, 6, 6, 7, 7, 8, 9, 10, 11]
+  demo_epsilon: 0.05
+  demo_splice_share: 0.5
+  output_dir: runs/beacon_structured_mappo_static_v12
