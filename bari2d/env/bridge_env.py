@@ -16,7 +16,10 @@ from bari2d.env.statics import max_load, stabilize
 from bari2d.utils.config import BEACON_FEATURE_SIZE, EnvironmentConfig
 
 
-START_SETUPS = ("none", "root_only", "walker_behind_root", "walker_on_root", "row_spanning")
+START_SETUPS = ("none", "root_only", "walker_behind_root", "walker_on_root", "row_spanning", "row_minus_1", "row_minus_2")
+# Prepared straight rows from a bank-gripping root: the full spanning row, or
+# one / two links short of it (reverse curriculum for the last links).
+ROW_SETUPS = {"row_spanning": 0, "row_minus_1": 1, "row_minus_2": 2}
 ANCHOR_RULES = ("edge_band", "front_downward_ir")
 CUE_SIZE = 2
 
@@ -144,7 +147,7 @@ class BridgeEnv:
         setup = self._start_setup()
         if setup != "none":
             self.contact_model.anchor(self.robots[0], self.robots, self.field)
-        if setup == "row_spanning":
+        if setup in ROW_SETUPS:
             # Grip every further link of the prepared row to the one behind it.
             attach = getattr(self.contact_model, "_attach", None)
             for robot in self.robots[1 : self._prepared_row_length]:
@@ -269,12 +272,14 @@ class BridgeEnv:
         left, _ = self.field.boundaries(tangent)
         root_position = self.field.center + self.field.normal * (left - 0.05) + self.field.tangent * tangent
         robots = [RobotState(0, root_position.astype(float), heading)]
-        if setup == "row_spanning":
+        if setup in ROW_SETUPS:
             # A straight single row from the root across the gap, resting at
-            # least 0.05 on the far bank (as scripted.assemble_static_chain).
+            # least 0.05 on the far bank (as scripted.assemble_static_chain);
+            # row_minus_k leaves out the last k links, so it does not span.
             _, right = self.field.boundaries(tangent)
             root_front = left - 0.05 + length / 2.0
             links = int(np.ceil(max(right + 0.05 - root_front, 0.0) / length))
+            links = max(links - ROW_SETUPS[setup], 0)
             for link in range(1, links + 1):
                 robots.append(RobotState(link, (root_position + self.field.normal * length * link).astype(float), heading))
             self._prepared_row_length = len(robots)
