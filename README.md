@@ -189,3 +189,8 @@ Tests cover gap generation, movement and steering, IR detection, contact and cli
 - Learned morphology quality depends on training budget and hyperparameters. This repository provides a functioning research baseline, not pretrained evidence of convergence.
 
 The structural evaluator, load protocol, dynamics, actor, and critic are separate modules so higher-fidelity physics or alternative learning algorithms can replace them without exposing global state to the decentralized actor.
+
+
+## Diagram Overview
+
+[![Architecture diagram of whishingraven/bari2dsandbox](https://gitdiagram.com/whishingraven/bari2dsandbox/diagram.png)](https://gitdiagram.com/whishingraven/bari2dsandbox?utm_source=readme&utm_medium=picture)
