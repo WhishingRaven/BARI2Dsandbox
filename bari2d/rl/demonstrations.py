@@ -71,7 +71,7 @@ def record_episode(
     observations, labels, masks, active = [], [], [], []
     auxiliary = {name: [] for name in AUXILIARY_TARGETS}
     info: dict = {"success": False}
-    for _ in range(environment_config.max_steps):
+    for _ in range(env._max_steps()):
         action_masks = env.action_masks()
         teacher_actions, worker = teacher.actions()
         executed = teacher_actions.copy()

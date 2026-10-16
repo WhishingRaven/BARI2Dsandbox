@@ -99,7 +99,7 @@ class GifRecorder:
         self.axis.set_title(
             f"{self.label} | seed {self.seed}\n"
             f"step {env.step_count}  edge grips {metrics['edge_grips']}  on structure {metrics['on_structure']}  "
-            f"extended {metrics['extended']}  top grips {top_grips(env)}  "
+            f"extended {metrics['extended']}  top grips {top_grips(env)}  crossed {metrics['crossed']}  "
             f"fallen {fallen(env)}  robots {active(env)}  capacity {env.current_capacity:.1f}/{env.target_load:.0f}",
             fontsize=9,
         )
@@ -143,7 +143,7 @@ def run_episode(config: ExperimentConfig, actor: SharedRecurrentActor, seed: int
     if recorder:
         recorder.snap(None, None, force=True)
     info: dict = {}
-    for _ in range(env.config.max_steps):
+    for _ in range(env._max_steps()):
         with torch.no_grad():
             output = actor.forward_step(torch.as_tensor(observation), hidden, torch.as_tensor(env.action_masks()))
         hidden = output.hidden
@@ -203,7 +203,7 @@ def main() -> None:
     for seed in range(*arguments.seeds):
         recorder_args = None
         if arguments.gif_dir is not None:
-            every = arguments.every or max(1, config.environment.max_steps // 200)
+            every = arguments.every or max(1, env._max_steps() // 200)
             path = arguments.gif_dir / f"{arguments.checkpoint.stem}_stage{stage}_seed{seed}.gif"
             recorder_args = {"label": label, "every": every, "max_frames": arguments.max_frames, "path": path}
         result, recorder = run_episode(config, actor, seed, arguments.deterministic,

@@ -383,6 +383,25 @@ class BridgeEnv:
                 candidates.append((distance, other))
         return min(candidates, key=lambda item: item[0])[1] if candidates else None
 
+    def _lower_support_layer(self, robot: RobotState) -> int | None:
+        """Highest layer more than one below ``robot`` whose robots it overlaps (somewhere to step down to)."""
+        layers = [
+            other.layer
+            for other in self.robots
+            if other.robot_id != robot.robot_id and not other.fallen and other.layer < robot.layer - 1
+            and oriented_boxes_overlap(robot, other, self.config.robot)
+        ]
+        return max(layers) if layers else None
+
+    def _climb_step(self, robot: RobotState, support: RobotState) -> float:
+        """Forward distance of a climb: 0.3 length, or onto ``support`` (physics.climb_onto_support)."""
+        length = self.config.robot.length
+        step = 0.3 * length
+        if self.config.physics.climb_onto_support:
+            ahead = float((support.position - robot.position) @ robot.heading)
+            step = max(step, ahead - 0.25 * length)
+        return step
+
     def _highest_overlapping_support_layer(self, robot: RobotState) -> int | None:
         """Return the highest lower layer whose footprint overlaps the robot."""
         layers: list[int] = []
@@ -429,12 +448,17 @@ class BridgeEnv:
         old_beacon_source = self._beacon_source_id
         old_beacon_distance = self._mean_beacon_distance()
         old_climb = self._climb_potential()
+        old_cross = self._cross_potential()
         newly_anchored = 0
-        climb_layers = {
-            robot.robot_id: min(robot.layer + 1, self.config.robot.max_layer)
+        climb_supports = {
+            robot.robot_id: self._climb_support(robot)
             for robot, action_value in zip(self.robots, action_array)
             if DiscreteAction(int(action_value)) == DiscreteAction.CLIMB
-            and self._climb_support(robot) is not None
+        }
+        climb_layers = {
+            robot_id: min(self.robots[robot_id].layer + 1, self.config.robot.max_layer)
+            for robot_id, support in climb_supports.items()
+            if support is not None
         }
         for robot, action_value in zip(self.robots, action_array):
             action = DiscreteAction(int(action_value))
@@ -450,7 +474,7 @@ class BridgeEnv:
                 climb_layer = climb_layers.get(robot.robot_id)
                 if climb_layer is not None:
                     robot.layer = climb_layer
-                    robot.position = robot.position + robot.heading * self.config.robot.length * 0.3
+                    robot.position = robot.position + robot.heading * self._climb_step(robot, climb_supports[robot.robot_id])
                     robot.energy += self._episode_randomization["robot_mass"] * self.config.robot.climb_height
                 robot.previous_action = int(action)
             elif not robot.anchored and not robot.fallen:
@@ -484,13 +508,14 @@ class BridgeEnv:
 
         accurate_capacity: float | None = None
         success = False
-        time_limit = self.step_count >= self.config.max_steps
-        if (self._structure_spans() and self.current_capacity >= self.target_load) or time_limit:
+        time_limit = self.step_count >= self._max_steps()
+        crossed_enough = self._crossed_count() >= self._required_crossers()
+        if (self._structure_spans() and self.current_capacity >= self.target_load and crossed_enough) or time_limit:
             self.phase = "load_test"
             self.last_load_test = self._evaluate_load(accurate=True)
             accurate_capacity = self.last_load_test.capacity
             self.current_capacity = accurate_capacity
-            success = self._structure_spans() and accurate_capacity >= self.target_load
+            success = self._structure_spans() and accurate_capacity >= self.target_load and crossed_enough
             self.phase = "complete" if success or time_limit else "construction"
 
         terminated = success
@@ -522,6 +547,7 @@ class BridgeEnv:
             ),
             "idle": -reward_config.idle_penalty * idle_violators,
             "climb": reward_config.climb_delta * (self._climb_potential() - old_climb),
+            "cross": reward_config.cross_delta * (self._cross_potential() - old_cross),
         }
         self._total_motion += energy_delta
         self._fallen_count = sum(robot.fallen for robot in self.robots)
@@ -599,7 +625,30 @@ class BridgeEnv:
             "edge_grips": sum(r.anchored and r.anchor_partner == LEFT_BANK and not r.fallen for r in self.robots),
             "on_structure": sum(self._robot_below_anchored(r) for r in self.robots),
             "extended": sum(self._extended(r) for r in self.robots),
+            "crossed": self._crossed_count(),
         }
+
+    def _stage_value(self, values: list, default):
+        if not values:
+            return default
+        return values[min(max(self.config.curriculum_stage - 1, 0), len(values) - 1)]
+
+    def _max_steps(self) -> int:
+        return int(self._stage_value(self.config.curriculum_max_steps, self.config.max_steps))
+
+    def _required_crossers(self) -> int:
+        return max(int(self._stage_value(self.config.load.curriculum_crossers, 0)), 0)
+
+    def _crossed_count(self) -> int:
+        """Robots that walked over to the far bank: free, on the ground there, still standing."""
+        return sum(
+            not robot.fallen and not robot.anchored and robot.layer == 0
+            and self.field.bank_at(robot.position) == RIGHT_BANK
+            for robot in self.robots
+        )
+
+    def _cross_potential(self) -> float:
+        return float(min(self._crossed_count(), self._required_crossers()))
 
     def _structure_spans(self) -> bool:
         """Bank-to-bank connection that can carry load under the active physics model."""
@@ -709,8 +758,11 @@ class BridgeEnv:
         for robot_id in outcome.unsupported:
             robot = self.robots[robot_id]
             self.contact_model.release(robot)
+            lower = self._lower_support_layer(robot) if self.config.physics.step_down_onto_lower else None
             if robot.layer > 0 and self.field.bank_at(robot.position) is not None:
                 robot.layer = 0  # tipped off a lower robot onto the ground
+            elif lower is not None:
+                robot.layer = lower + 1  # tipped off onto a robot further below
             else:
                 robot.fallen = True
                 robot.velocity = 0.0

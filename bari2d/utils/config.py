@@ -100,6 +100,10 @@ class LoadConfig:
     load_protocol: str = "uniform"
     # Optional per-stage loads, analogous to GapConfig.curriculum_widths.
     curriculum_targets: list[float] = field(default_factory=list)
+    # Per curriculum stage, how many robots must walk over the finished bridge
+    # to the far bank (free, on the ground there) before the load test counts
+    # as success (the last value is reused; empty or 0 = no crossing).
+    curriculum_crossers: list[int] = field(default_factory=list)
 
 
 @dataclass
@@ -146,6 +150,9 @@ class RewardConfig:
     # the root earns the climb reward, further ones only crowd the deck, while
     # extended links count up to climb_cap.
     climb_standing_cap: int = -1
+    # Potential reward per robot that has crossed to the far bank (at most the
+    # stage's required number count); walking back gives it back.
+    cross_delta: float = 0.0
 
 
 @dataclass
@@ -190,11 +197,25 @@ class PhysicsConfig:
     # path (a doubler plate) to that joint.
     splice_grip: bool = False
     splice_min_overlap: float = 0.15
+    # Climbing lands on the robot climbed: the climber moves forward far
+    # enough that its centre ends a quarter length inside that robot (at least
+    # the old 0.3 length step).  Without it a climb from end-to-end contact
+    # stops with the centre behind the robot climbed, which only the ground
+    # contact of layer 1 can hold, so a robot on the deck cannot climb over a
+    # robot lying on it (a splice) to cross the bridge.
+    climb_onto_support: bool = False
+    # A robot that tips off the robot it stands on (its centre leaves that
+    # robot) over the gap drops onto a robot further below it instead of
+    # falling, as it already drops onto the ground over a bank.  Lets a robot
+    # walk off the front of a splice back onto the chain it covers.
+    step_down_onto_lower: bool = False
 
 
 @dataclass
 class EnvironmentConfig:
     max_steps: int = 1000
+    # Per curriculum stage time limit (the last value is reused); empty = max_steps.
+    curriculum_max_steps: list[int] = field(default_factory=list)
     time_step: float = 0.1
     curriculum_stage: int = 1
     seed: int = 0
