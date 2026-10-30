@@ -11,10 +11,11 @@ from bari2d.env.bridge_env import BridgeEnv
 from bari2d.models.actor import SharedRecurrentActor
 from bari2d.models.critic import CentralizedCritic
 from bari2d.models.graph_critic import GraphCritic
+from bari2d.rl.capacity_teacher import CapacityTeacher
 from bari2d.rl.mappo import MAPPO
 from bari2d.rl.rollout_buffer import RolloutBuffer
 from bari2d.utils.config import ExperimentConfig
-from bari2d.utils.logging import EpisodeLogger, PolicyStatistics
+from bari2d.utils.logging import EpisodeLogger, PolicyStatistics, UpdateLogger
 
 
 class CurriculumScheduler:
@@ -51,7 +52,14 @@ class Trainer:
         else:
             raise ValueError(f"Unknown critic: {config.training.critic}")
         self.algorithm = MAPPO(self.actor, self.critic, config.training, self.device)
+        teacher_config = config.training.capacity_teacher
+        self.capacity_teacher = (
+            CapacityTeacher(teacher_config, config.environment, device=self.device)
+            if teacher_config.enabled
+            else None
+        )
         self.logger = EpisodeLogger(config.training.output_dir)
+        self.update_logger = UpdateLogger(config.training.output_dir)
         self.curriculum = CurriculumScheduler(config)
         self.output_dir = Path(config.training.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -120,10 +128,32 @@ class Trainer:
                 action_values = actions.cpu().numpy()
                 policy_statistics.add(action_values, output.latents)
                 next_observation, reward, terminated, truncated, info = self.env.step(action_values)
+                done = terminated or truncated
+                if done and self.capacity_teacher is not None:
+                    teacher = self.capacity_teacher.evaluate(self.env)
+                    reward += teacher.terminal_reward
+                    info["agent_rewards"] = (
+                        np.asarray(info["agent_rewards"], dtype=np.float32) + teacher.agent_credits
+                    ).astype(np.float32)
+                    info["reward_components"]["capacity_terminal"] = float(teacher.terminal_reward)
+                    info["capacity_teacher"] = {
+                        "backend": teacher.backend,
+                        "capacity_kg": teacher.capacity_kg,
+                        "critical_component": teacher.critical_component,
+                        "agent_credits": teacher.agent_credits,
+                    }
+                    # Curriculum/success reporting now uses the same structural
+                    # objective as policy training instead of the legacy scalar
+                    # graph-flow proxy.
+                    info["success"] = bool(
+                        self.env.graph.spans and teacher.capacity_kg >= self.env.target_load
+                    )
+                    self.env._episode_success = bool(info["success"])
+                else:
+                    info["reward_components"].setdefault("capacity_terminal", 0.0)
                 episode_reward += reward
                 for name, component_value in info["reward_components"].items():
                     reward_component_totals[name] = reward_component_totals.get(name, 0.0) + float(component_value)
-                done = terminated or truncated
                 buffer.add(
                     observation,
                     global_state,
@@ -180,6 +210,7 @@ class Trainer:
             metrics["update"] = float(update)
             metrics["curriculum_stage"] = float(self.env.config.curriculum_stage)
             history.append(metrics)
+            self.update_logger.log(metrics)
             print(
                 f"Update {update}/{update_count} "
                 f"actor_loss={metrics['actor_loss']:.4f} "

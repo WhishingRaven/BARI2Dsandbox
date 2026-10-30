@@ -199,7 +199,7 @@ global_state()는 기본적으로 187차원이다.
 
 ## 설정 및 확인
 
-기준값은 configs/baseline.yaml과 bari2d/utils/config.py의 RobotConfig, SensorConfig, ContactConfig, EnvironmentConfig에 정의되어 있다. 실행 중 실제 인터페이스 크기는 다음처럼 확인할 수 있다.
+기준값은 configs/capacity_local.yaml과 bari2d/utils/config.py의 RobotConfig, SensorConfig, ContactConfig, EnvironmentConfig에 정의되어 있다. 실행 중 실제 인터페이스 크기는 다음처럼 확인할 수 있다.
 
     conda run -n bari2d python -c "
     from bari2d.env.bridge_env import BridgeEnv

@@ -11,6 +11,19 @@ from bari2d.env.field import LEFT_BANK, RIGHT_BANK, GapField, GapGenerator
 from bari2d.env.load_evaluator import FastLoadEvaluator, IncrementalLoadEvaluator, LoadTestResult
 from bari2d.env.robot import ACTION_COUNT, DiscreteAction, RobotState
 from bari2d.env.sensors import ir_distances, ir_ray_count
+from bari2d.mechanics import (
+    PlanarCapacityResult,
+    PlanarLoad,
+    PlanarStaticResult,
+    PlanarStaticSolver,
+    PlanarWrenchLimit,
+    LocalWrenchLimit,
+    SpatialCapacityResult,
+    SpatialLoad,
+    SpatialStaticResult,
+    SpatialStaticSolver,
+    SpatialWrenchLimit,
+)
 from bari2d.utils.config import EnvironmentConfig
 
 
@@ -211,6 +224,80 @@ class BridgeEnv:
             dtype=np.float32,
         )
 
+    def planar_static_response(self, loads: Iterable[PlanarLoad]) -> PlanarStaticResult:
+        """Solve in-plane (Fx, Fy, Mz) rigid-body statics for the current morphology."""
+        solver = PlanarStaticSolver(self.robots, self.graph, self.field, self.config.robot)
+        return solver.solve(loads)
+
+    def planar_payload_capacity(
+        self,
+        payload_per_kg: PlanarLoad,
+        limits: PlanarWrenchLimit | dict[frozenset[int | str], PlanarWrenchLimit],
+        *,
+        base_loads: Iterable[PlanarLoad] = (),
+    ) -> PlanarCapacityResult:
+        """Return the exact linear-static payload mass at the first contact limit.
+
+        This is intentionally separate from `FastLoadEvaluator` and
+        `IncrementalLoadEvaluator`; those graph-flow proxies remain unchanged for
+        RL speed and checkpoint compatibility.
+        """
+        solver = PlanarStaticSolver(self.robots, self.graph, self.field, self.config.robot)
+        return solver.capacity(payload_per_kg, limits, base_loads=base_loads)
+
+    def spatial_static_response(self, loads: Iterable[SpatialLoad]) -> SpatialStaticResult:
+        """Solve 6-DOF small-displacement statics for the current 2.5-D morphology.
+
+        Robot layer is extruded into z using `robot.climb_height`; the RL
+        environment itself remains unchanged.
+        """
+        solver = SpatialStaticSolver(self.robots, self.graph, self.field, self.config.robot)
+        return solver.solve(loads)
+
+    def spatial_payload_capacity(
+        self,
+        payload_per_kg: SpatialLoad,
+        limits: SpatialWrenchLimit | dict[frozenset[int | str], SpatialWrenchLimit],
+        *,
+        base_loads: Iterable[SpatialLoad] = (),
+        include_self_weight: bool = True,
+        gravity: tuple[float, float, float] = (0.0, 0.0, -9.81),
+    ) -> SpatialCapacityResult:
+        """Return the 6-D wrench-limited payload capacity of the current bridge.
+
+        Self-weight of every robot in the payload's connected component is
+        included by default. Existing simulator contacts remain intact; this
+        method only evaluates the wrench that those contacts would have to
+        transmit.
+        """
+        solver = SpatialStaticSolver(self.robots, self.graph, self.field, self.config.robot)
+        return solver.capacity(
+            payload_per_kg,
+            limits,
+            base_loads=base_loads,
+            include_self_weight=include_self_weight,
+            gravity=gravity,
+        )
+
+    def local_spatial_payload_capacity(
+        self,
+        payload_per_kg: SpatialLoad,
+        limits: LocalWrenchLimit | dict[frozenset[int | str], LocalWrenchLimit],
+        *,
+        base_loads: Iterable[SpatialLoad] = (),
+        include_self_weight: bool = True,
+        gravity: tuple[float, float, float] = (0.0, 0.0, -9.81),
+    ) -> SpatialCapacityResult:
+        """Evaluate connector-local axial/shear/bending/torsion limits."""
+        solver = SpatialStaticSolver(self.robots, self.graph, self.field, self.config.robot)
+        return solver.capacity_local(
+            payload_per_kg,
+            limits,
+            base_loads=base_loads,
+            include_self_weight=include_self_weight,
+            gravity=gravity,
+        )
+
     def action_masks(self) -> np.ndarray:
         masks = np.ones((len(self.robots), ACTION_COUNT), dtype=bool)
         for robot in self.robots:
@@ -343,17 +430,29 @@ class BridgeEnv:
         accurate_capacity: float | None = None
         success = False
         time_limit = self.step_count >= self.config.max_steps
-        if (self.graph.spans and self.current_capacity >= self.target_load) or time_limit:
-            self.phase = "load_test"
-            self.last_load_test = self.accurate_evaluator.evaluate(self.graph)
-            accurate_capacity = self.last_load_test.capacity
-            self.current_capacity = accurate_capacity
-            success = self.graph.spans and accurate_capacity >= self.target_load
-            self.phase = "complete" if success or time_limit else "construction"
-
-        terminated = success
+        objective = self.config.episode_objective
+        if objective == "legacy_target":
+            if (self.graph.spans and self.current_capacity >= self.target_load) or time_limit:
+                self.phase = "load_test"
+                self.last_load_test = self.accurate_evaluator.evaluate(self.graph)
+                accurate_capacity = self.last_load_test.capacity
+                self.current_capacity = accurate_capacity
+                success = self.graph.spans and accurate_capacity >= self.target_load
+                self.phase = "complete" if success or time_limit else "construction"
+            terminated = success
+            truncated = time_limit and not terminated
+        elif objective == "capacity_horizon":
+            # Capacity-policy training deliberately does not terminate when a
+            # provisional target load is first reached.  The robots may keep
+            # adding braces/anchors until the fixed construction horizon, where
+            # the training-only capacity teacher scores the final morphology.
+            success = bool(time_limit and self.graph.spans)
+            self.phase = "complete" if time_limit else "construction"
+            terminated = False
+            truncated = time_limit
+        else:
+            raise ValueError(f"Unknown episode_objective: {objective!r}")
         self._episode_success = success
-        truncated = time_limit and not terminated
 
         new_quality = min(self.current_capacity / max(self.target_load, 1.0e-9), 1.0)
         energy_by_robot = np.asarray(

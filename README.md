@@ -18,57 +18,31 @@ All commands in this project should run inside that environment.
 
 ## Quick start
 
-Run the deterministic simulator verification:
-
-```bash
-conda run -n bari2d python scripts/verify_scripted.py
-```
-
-Train the simplest recurrent shared policy:
+Train the canonical capacity-teacher/local-policy system:
 
 ```bash
 conda run -n bari2d python scripts/train.py \
-  --config configs/baseline.yaml \
-  --updates 1000
-```
-
-Train the full branch architecture with FiLM conditioning and the graph critic:
-
-```bash
-conda run -n bari2d python scripts/train.py \
-  --config configs/bio_film.yaml \
-  --updates 1000
-```
-
-Resume a run from update 1,000 through update 2,000 (the checkpoint's saved
-configuration and optimizer state are used):
-
-```bash
-conda run -n bari2d python scripts/train.py \
-  --resume runs/baseline/checkpoint_001000.pt \
+  --config configs/capacity_local.yaml \
   --updates 2000
 ```
 
-Evaluate a checkpoint on stage-4 randomized gaps:
+Resume training:
+
+```bash
+conda run -n bari2d python scripts/train.py \
+  --resume runs/capacity_local/checkpoint_002000.pt \
+  --updates 3000
+```
+
+Evaluate with the exact 6-DOF capacity solver:
 
 ```bash
 conda run -n bari2d python scripts/evaluate.py \
-  runs/baseline/checkpoint_001000.pt \
-  --config configs/baseline.yaml --stage 4 --episodes 100
+  runs/capacity_local/checkpoint_002000.pt \
+  --config configs/capacity_local.yaml --stage 4 --episodes 100
 ```
 
-Render a manually assembled load-bearing fixture:
-
-```bash
-conda run -n bari2d python scripts/visualize_episode.py \
-  --rows 2 --output bridge.png
-```
-
-Manually select and control one robot per step:
-
-```bash
-conda run -n bari2d python scripts/manual.py
-```
+The old YAML actor/critic ablation suite has been removed. `capacity_local.yaml` is the canonical policy-training setup.
 
 ## Simulator
 
@@ -125,33 +99,19 @@ This is a research proxy, not a validated structural-engineering solver. Edge ca
 
 ### Reward
 
-Reward contains only functional terms:
+Policy learning now uses a training-only structural capacity teacher. Construction runs for a fixed horizon; reaching an old scalar target-load proxy no longer terminates the episode early. At the final state `G_T`, the teacher computes or predicts the physically defined payload capacity `C(G_T)` and turns it into the main terminal team return.
 
-```text
-r_span = alpha * (progress[t+1] - progress[t])
-r_mech = beta * (min(F_cap[t+1] / F_target, 1) - min(F_cap[t] / F_target, 1))
-r_eff  = -time - movement_energy - newly_used_robots - new_anchors - collapse
-```
+The teacher also computes leave-one-robot-out counterfactual capacities `C(G_T \ i)`. Their differences provide per-robot structural credit to MAPPO. Small progress, energy, anchor, and collapse terms remain only as exploration/efficiency shaping in `configs/capacity_local.yaml`; the legacy graph-flow mechanical reward is set to zero.
 
-Terminal success requires both bank-to-bank connectivity and an accurate terminal capacity at least as large as the sampled target. A connected weak structure and a strong disconnected structure both fail. No term rewards triangles, trusses, angles, paths, or named bridge forms.
+The actor never observes capacity, counterfactual credit, the global graph, or the teacher output. These signals exist only during centralized training.
 
 ## Policy and critics
 
-The full actor has independent temporal traffic, connectivity, and mechanical branches plus a target-load encoder. Their latent outputs and robot internal state feed a compact GRU. Optional FiLM maps the target embedding to scale and bias traffic and mechanical latents. Connectivity, traffic, contact-persistence, and force-trend heads learn simulator targets during training only. Those targets are not actor inputs and are not needed for inference.
+The canonical deployed policy is one shared GRU. Every robot receives only its own local observation/history and maintains its own recurrent hidden state. There is no robot ID, global position, contact graph, capacity prediction, or centralized message in the actor input. The same weights therefore implement one decentralized local rule on every robot.
 
-Set `model.architecture` to select an ablation:
+During training only, the graph critic receives the global contact state and estimates the expected future terminal return. The capacity teacher is also training-only. Neither is required for inference.
 
-- `mlp`
-- `gru`
-- `gru_traffic`
-- `gru_traffic_connectivity`
-- `bio`
-- `bio_film`
-- `bio_heterogeneity`
-
-`bio_heterogeneity` consumes the per-episode latent; its standard deviation is configured by `environment.latent_sigma` and defaults to zero.
-
-The baseline centralized critic is an MLP over flattened simulator state. The graph critic performs dependency-free message passing over training-only robot nodes and mechanical edges. Both produce one cooperative team value.
+Older actor classes remain in the source for checkpoint compatibility, but the old YAML ablation suite is no longer part of the training workflow.
 
 ## MAPPO
 
@@ -194,3 +154,47 @@ The structural evaluator, load protocol, dynamics, actor, and critic are separat
 ## Diagram Overview
 
 [![Architecture diagram of whishingraven/bari2dsandbox](https://gitdiagram.com/whishingraven/bari2dsandbox/diagram.png)](https://gitdiagram.com/whishingraven/bari2dsandbox?utm_source=readme&utm_medium=picture)
+
+### 6-DOF static bridge capacity
+
+The optional mechanics layer can evaluate the current 2.5-D morphology as an
+extruded 3-D rigid-body structure and report the contact wrench
+`(Fx, Fy, Fz, Mx, My, Mz)`. Each contact also exposes the connector-local
+`(Axial, ShearU, ShearV, Torsion, BendingU, BendingV)` representation. It
+includes robot self-weight and can compute the first connector-local strength
+limit reached by an added payload analytically.
+See `docs/spatial_statics.md`.
+
+## Procedural wrench-capacity learning
+
+The repository also contains a supervised structural-learning pipeline built on the 6-DOF spatial statics solver. `RandomBridgeGenerator` creates unlimited variable-size bank-to-bank morphologies with parallel rows, braces, branches, and stacked robots. `CapacityDatasetBuilder` samples six-component connector-local strength limits, applies a 1 kg gravity payload at a bridge-deck location, includes robot self-weight, and computes the exact first contact/component failure mass.
+
+Generate a finite dataset:
+
+```bash
+python scripts/generate_capacity_dataset.py \
+  --samples 100000 --workers 4 \
+  --feature-mode mechanics_informed \
+  --payload-mode random \
+  --output runs/capacity/mechanics_100k.pt
+```
+
+Train from a finite dataset:
+
+```bash
+python scripts/train_capacity_gnn.py \
+  --dataset runs/capacity/mechanics_100k.pt \
+  --epochs 50 --batch-size 64 \
+  --output runs/capacity/mechanics_gnn.pt
+```
+
+Or generate fresh bridges indefinitely during training:
+
+```bash
+python scripts/train_capacity_gnn.py \
+  --feature-mode geometry_only \
+  --steps 20000 --batch-size 32 --workers 4 \
+  --output runs/capacity/geometry_online.pt
+```
+
+See `docs/capacity_learning.md` for the graph features, exact labeling equation, auxiliary failure-location targets, and the distinction between the mechanics-informed control baseline and the scientifically harder geometry-only prediction task.

@@ -28,8 +28,16 @@ def test_recurrent_mappo_completes_one_update(tmp_path, capsys) -> None:
     episode_path = tmp_path / "episodes.jsonl"
     assert episode_path.exists()
     episode = json.loads(episode_path.read_text(encoding="utf-8").splitlines()[0])
+    update_path = tmp_path / "updates.jsonl"
+    assert update_path.exists()
+    update = json.loads(update_path.read_text(encoding="utf-8").splitlines()[0])
+    assert "approx_kl" in update
+    assert "clip_fraction" in update
+    assert "explained_variance" in update
     assert "episode_reward" in episode
     assert "gap_progress" in episode["reward_component_totals"]
+    assert "capacity_terminal" in episode["reward_component_totals"]
+    assert "capacity_teacher" in episode
     assert len(episode["agent_rewards"]) == config.environment.robot.count
 
 

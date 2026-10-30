@@ -348,7 +348,7 @@ class ManualViewer:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Interactively control BARI2D robots.")
-    parser.add_argument("--config", type=Path, default=Path("configs/baseline.yaml"))
+    parser.add_argument("--config", type=Path, default=Path("configs/capacity_local.yaml"))
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--stage", type=int, choices=range(1, 5))
     parser.add_argument("--target-load", type=float)

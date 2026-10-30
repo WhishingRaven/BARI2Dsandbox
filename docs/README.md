@@ -8,7 +8,7 @@ BARI2D는 약 20대의 동일한 크롤링 로봇이 국소 센서와 공유 정
 - [simulation.md](simulation.md): 간극, 로봇, 센서, 접촉, 앵커와 하중 시험
 - [training.md](training.md): 분산 행위자, 중앙 비평가, MAPPO와 커리큘럼
 - [experiments.md](experiments.md): 검증, 절제 실험, 지표와 재현 절차
-- [configurations.md](configurations.md): baseline, bio_film 및 모든 학습 YAML의 차이와 공정 비교법
+- [configurations.md](configurations.md): capacity-teacher 기반 canonical local-policy 설정
 - [inference.md](inference.md): 체크포인트 선택과 그래픽 정책 추론
 - [manual_control.md](manual_control.md): 키보드·마우스로 한 로봇씩 수동 조종
 - [robot_interface.md](robot_interface.md): 로봇 사양, RobotState, actor 관측, 행동 마스크와 중앙 critic 상태
@@ -34,11 +34,11 @@ BARI2D는 약 20대의 동일한 크롤링 로봇이 국소 센서와 공유 정
 기준 정책 훈련:
 
     conda run -n bari2d python scripts/train.py \
-      --config configs/baseline.yaml --updates 1000
+      --config configs/capacity_local.yaml --updates 1000
 
 전체 생물 영감형 정책 훈련:
 
     conda run -n bari2d python scripts/train.py \
-      --config configs/bio_film.yaml --updates 1000
+      --config configs/capacity_local.yaml --updates 1000
 
 상세한 사용법과 현재 한계는 저장소 루트의 [README.md](../README.md)를 함께 참고한다.

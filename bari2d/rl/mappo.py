@@ -44,7 +44,15 @@ class MAPPO:
         config = self.config
         robot_count = batch.observations.shape[1]
         minibatch_size = min(config.sequence_minibatch_agents, robot_count)
-        metrics: dict[str, list[float]] = {"actor_loss": [], "critic_loss": [], "entropy": [], "auxiliary_loss": []}
+        metrics: dict[str, list[float]] = {
+            "actor_loss": [],
+            "policy_loss": [],
+            "critic_loss": [],
+            "entropy": [],
+            "auxiliary_loss": [],
+            "approx_kl": [],
+            "clip_fraction": [],
+        }
         for _ in range(config.ppo_epochs):
             agent_order = torch.randperm(robot_count, device=self.device)
             for start in range(0, robot_count, minibatch_size):
@@ -73,8 +81,13 @@ class MAPPO:
                 nn.utils.clip_grad_norm_(self.actor.parameters(), config.max_grad_norm)
                 self.actor_optimizer.step()
                 metrics["actor_loss"].append(float(actor_loss.detach()))
+                metrics["policy_loss"].append(float(policy_loss.detach()))
                 metrics["entropy"].append(float(entropy.detach()))
                 metrics["auxiliary_loss"].append(float(auxiliary_loss.detach()))
+                metrics["approx_kl"].append(float((batch.old_log_probabilities[:, agents] - log_probabilities).mean().detach()))
+                metrics["clip_fraction"].append(
+                    float(((ratio - 1.0).abs() > config.clip_ratio).float().mean().detach())
+                )
 
             if isinstance(self.critic, GraphCritic):
                 if batch.graph_nodes is None or batch.graph_adjacency is None or batch.graph_edges is None:
@@ -88,7 +101,24 @@ class MAPPO:
             nn.utils.clip_grad_norm_(self.critic.parameters(), config.max_grad_norm)
             self.critic_optimizer.step()
             metrics["critic_loss"].append(float(critic_loss.detach()))
-        return {name: float(np.mean(values)) for name, values in metrics.items()}
+
+        with torch.no_grad():
+            if isinstance(self.critic, GraphCritic):
+                final_values = self.critic(batch.graph_nodes, batch.graph_adjacency, batch.graph_edges)
+            else:
+                final_values = self.critic(batch.global_states)
+            return_variance = torch.var(batch.returns, unbiased=False)
+            if float(return_variance) <= 1.0e-12:
+                explained_variance = 0.0
+            else:
+                residual_variance = torch.var(batch.returns - final_values, unbiased=False)
+                explained_variance = float((1.0 - residual_variance / return_variance).detach())
+
+        result = {name: float(np.mean(values)) for name, values in metrics.items()}
+        result["explained_variance"] = explained_variance
+        result["value_mean"] = float(final_values.mean().detach())
+        result["return_mean"] = float(batch.returns.mean().detach())
+        return result
 
     def state_dict(self) -> dict[str, Any]:
         return {

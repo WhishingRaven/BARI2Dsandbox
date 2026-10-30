@@ -7,6 +7,8 @@ import numpy as np
 from matplotlib import animation, colors, patches, transforms
 
 from bari2d.env.bridge_env import BridgeEnv
+from bari2d.env.robot import DiscreteAction
+from bari2d.mechanics import LocalWrenchLimit, SpatialCapacityResult
 
 
 def robot_layer_color(layer: int, max_layer: int) -> tuple[float, float, float, float]:
@@ -21,7 +23,15 @@ def robot_layer_zorder(layer: int, detail: int = 0) -> float:
     return 10.0 + max(layer, 0) * 10.0 + detail
 
 
-def draw_environment(env: BridgeEnv, axis: plt.Axes | None = None) -> plt.Axes:
+def draw_environment(
+    env: BridgeEnv,
+    axis: plt.Axes | None = None,
+    *,
+    contact_utilization: dict[frozenset[int | str], float] | None = None,
+    critical_contact: tuple[int | str, int | str] | None = None,
+    exact_capacity_kg: float | None = None,
+    show_action_summary: bool = False,
+) -> plt.Axes:
     axis = axis or plt.subplots(figsize=(11, 6))[1]
     axis.clear()
     field = env.field
@@ -41,14 +51,26 @@ def draw_environment(env: BridgeEnv, axis: plt.Axes | None = None) -> plt.Axes:
     background[gap_mask] = (0.494, 0.714, 0.812, 0.35)
     axis.imshow(background, origin="lower", extent=(0.0, field.length, 0.0, field.width), aspect="auto")
 
+    critical_key = None if critical_contact is None else frozenset(critical_contact)
+    utilization_map = contact_utilization or {}
+    utilization_cmap = plt.get_cmap("RdYlGn_r")
     for edge in env.graph.edges.values():
         if not isinstance(edge.source, int) or not isinstance(edge.target, int):
             continue
         first = env.robots[edge.source].position
         second = env.robots[edge.target].position
-        color = "#b2182b" if edge.kind == "anchor" else "#555555"
-        width = 2.2 if edge.kind == "anchor" else 0.8
-        axis.plot([first[0], second[0]], [first[1], second[1]], color=color, linewidth=width, alpha=0.75)
+        key = frozenset((edge.source, edge.target))
+        utilization = utilization_map.get(key)
+        if utilization is None:
+            color = "#b2182b" if edge.kind == "anchor" else "#555555"
+            width = 2.2 if edge.kind == "anchor" else 0.8
+        else:
+            color = utilization_cmap(float(np.clip(utilization, 0.0, 1.0)))
+            width = 1.5 + 3.0 * float(np.clip(utilization, 0.0, 1.0))
+        if key == critical_key:
+            color = "#d73027"
+            width = max(width, 5.0)
+        axis.plot([first[0], second[0]], [first[1], second[1]], color=color, linewidth=width, alpha=0.9)
 
     load_path = [] if env.last_load_test is None else env.last_load_test.load_bearing_path
     for first_node, second_node in zip(load_path, load_path[1:]):
@@ -104,22 +126,70 @@ def draw_environment(env: BridgeEnv, axis: plt.Axes | None = None) -> plt.Axes:
             )
 
     axis.set(xlim=(0.0, field.length), ylim=(0.0, field.width), aspect="equal")
+    capacity_text = f"proxy_capacity={env.current_capacity:.2f}"
+    if exact_capacity_kg is not None:
+        capacity_text += f" exact_capacity={exact_capacity_kg:.2f} kg"
     axis.set_title(
-        f"step={env.step_count} target={env.target_load:.2f} capacity={env.current_capacity:.2f} "
+        f"step={env.step_count} target={env.target_load:.2f} {capacity_text} "
         f"progress={env.current_progress:.2f} span={env.graph.spans}"
     )
     axis.text(
         0.01,
         0.01,
-        f"본체색: layer 0 (빨강) → {env.config.robot.max_layer} (보라); 보라색 삼각형: 하향 IR",
+        f"body color: layer 0 (red) -> {env.config.robot.max_layer} (violet); triangle: downward IR",
         transform=axis.transAxes,
         fontsize=8,
         va="bottom",
         bbox={"facecolor": "white", "alpha": 0.7, "edgecolor": "none"},
     )
+    if show_action_summary:
+        counts: dict[str, int] = {}
+        for robot in env.robots:
+            name = DiscreteAction(int(robot.previous_action)).name
+            counts[name] = counts.get(name, 0) + 1
+        summary = " | ".join(f"{name}:{count}" for name, count in sorted(counts.items()) if count)
+        axis.text(
+            0.99,
+            0.01,
+            summary,
+            transform=axis.transAxes,
+            fontsize=8,
+            ha="right",
+            va="bottom",
+            bbox={"facecolor": "white", "alpha": 0.7, "edgecolor": "none"},
+        )
     axis.set_xlabel("x")
     axis.set_ylabel("y")
     return axis
+
+
+def contact_utilization_at_payload(
+    result: SpatialCapacityResult,
+    limits: LocalWrenchLimit,
+    payload_kg: float | None = None,
+) -> dict[frozenset[int | str], float]:
+    """Return maximum local component utilization for each solved contact.
+
+    Utilization 1.0 means one local axial/shear/torsion/bending component has
+    reached its configured connector limit. Values above one indicate the
+    requested payload exceeds that component limit.
+    """
+    mass = result.max_payload_kg if payload_kg is None else float(payload_kg)
+    if not np.isfinite(mass):
+        mass = 0.0
+    base = result.base_response.contact_by_key()
+    unit = result.unit_payload_response.contact_by_key()
+    maxima = limits.as_array()
+    output: dict[frozenset[int | str], float] = {}
+    for key in set(base) | set(unit):
+        base_wrench = base[key].local_wrench_on_source.as_array() if key in base else np.zeros(6)
+        unit_wrench = unit[key].local_wrench_on_source.as_array() if key in unit else np.zeros(6)
+        wrench = base_wrench + mass * unit_wrench
+        ratios = np.zeros(6, dtype=float)
+        finite = np.isfinite(maxima) & (maxima > 0.0)
+        ratios[finite] = np.abs(wrench[finite]) / maxima[finite]
+        output[key] = float(np.max(ratios))
+    return output
 
 
 def save_frame(env: BridgeEnv, path: str | Path) -> None:
@@ -158,3 +228,54 @@ def record_episode(env: BridgeEnv, policy, path: str | Path, max_steps: int | No
     movie.save(path, writer=animation.PillowWriter(fps=12))
     plt.close(output_figure)
     return final_info
+
+
+def draw_capacity_result(
+    env: BridgeEnv,
+    result: SpatialCapacityResult,
+    limits: LocalWrenchLimit,
+    axis: plt.Axes | None = None,
+    *,
+    payload_kg: float | None = None,
+) -> plt.Axes:
+    """Draw the final bridge with connector utilization from exact statics."""
+    mass = result.max_payload_kg if payload_kg is None else float(payload_kg)
+    utilization = contact_utilization_at_payload(result, limits, mass)
+    axis = draw_environment(
+        env,
+        axis,
+        contact_utilization=utilization,
+        critical_contact=result.critical_contact,
+        exact_capacity_kg=mass,
+        show_action_summary=True,
+    )
+    cmap = plt.get_cmap("RdYlGn_r")
+    critical_key = None if result.critical_contact is None else frozenset(result.critical_contact)
+    response_by_key = result.base_response.contact_by_key()
+    response_by_key.update(result.unit_payload_response.contact_by_key())
+    for key, response in response_by_key.items():
+        if isinstance(response.source, int) and isinstance(response.target, int):
+            continue
+        robot_id = response.source if isinstance(response.source, int) else response.target
+        if not isinstance(robot_id, int):
+            continue
+        start = env.robots[robot_id].position
+        point = np.asarray(response.point[:2], dtype=float)
+        value = utilization.get(key, 0.0)
+        color = "#d73027" if key == critical_key else cmap(float(np.clip(value, 0.0, 1.0)))
+        width = 5.0 if key == critical_key else 1.5 + 3.0 * float(np.clip(value, 0.0, 1.0))
+        axis.plot([start[0], point[0]], [start[1], point[1]], color=color, linewidth=width, alpha=0.95)
+    critical = "none"
+    if result.critical_contact is not None:
+        critical = f"{result.critical_contact} / {result.critical_component}"
+    axis.text(
+        0.5,
+        0.99,
+        f"connector utilization at {mass:.2f} kg; critical={critical}",
+        transform=axis.transAxes,
+        ha="center",
+        va="top",
+        fontsize=9,
+        bbox={"facecolor": "white", "alpha": 0.78, "edgecolor": "none"},
+    )
+    return axis

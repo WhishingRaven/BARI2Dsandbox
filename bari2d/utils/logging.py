@@ -17,15 +17,25 @@ def _json_default(value: Any) -> Any:
     raise TypeError(f"Cannot serialize {type(value).__name__}")
 
 
-class EpisodeLogger:
-    def __init__(self, output_dir: str | Path):
+class JsonlLogger:
+    def __init__(self, output_dir: str | Path, filename: str):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.path = self.output_dir / "episodes.jsonl"
+        self.path = self.output_dir / filename
 
     def log(self, metrics: dict[str, Any]) -> None:
         with self.path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(metrics, default=_json_default, separators=(",", ":")) + "\n")
+
+
+class EpisodeLogger(JsonlLogger):
+    def __init__(self, output_dir: str | Path):
+        super().__init__(output_dir, "episodes.jsonl")
+
+
+class UpdateLogger(JsonlLogger):
+    def __init__(self, output_dir: str | Path):
+        super().__init__(output_dir, "updates.jsonl")
 
 
 class PolicyStatistics:

@@ -41,23 +41,26 @@ def test_new_anchor_is_penalized(env) -> None:
     assert info["reward_components"]["anchor"] < 0.0
 
 
-def test_success_requires_span_and_target_capacity(env) -> None:
-    env.target_load = 3.0
+def test_capacity_objective_does_not_stop_when_bridge_first_spans(env) -> None:
     assemble_parallel_bridge(env, rows=1)
     actions = np.full(len(env.robots), int(DiscreteAction.IDLE))
-    _, _, terminated, _, info = env.step(actions)
-    assert terminated
-    assert info["success"]
-    assert info["reward_components"]["success"] > 0.0
-
-    env.reset(seed=13)
-    env.target_load = 8.0
-    assemble_parallel_bridge(env, rows=1)
-    _, _, terminated, _, info = env.step(actions)
+    _, _, terminated, truncated, info = env.step(actions)
     assert not terminated
-    assert not info["success"]
+    assert not truncated
     assert info["span"]
-    assert info["capacity"] < info["target_load"]
+    assert not info["success"]
+
+
+def test_capacity_objective_ends_at_fixed_horizon(environment_config) -> None:
+    from bari2d.env.bridge_env import BridgeEnv
+
+    environment_config.max_steps = 1
+    environment = BridgeEnv(environment_config)
+    environment.reset(seed=13)
+    actions = np.full(len(environment.robots), int(DiscreteAction.IDLE))
+    _, _, terminated, truncated, _ = environment.step(actions)
+    assert not terminated
+    assert truncated
 
 
 def test_new_rightward_progress_in_gap_is_rewarded_once(env) -> None:

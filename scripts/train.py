@@ -11,8 +11,8 @@ from bari2d.utils.config import config_from_dict, load_config
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train decentralized bridge construction with recurrent MAPPO")
-    parser.add_argument("--config", default="configs/baseline.yaml", help="Training configuration (ignored when --resume is used).")
+    parser = argparse.ArgumentParser(description="Train a decentralized local bridge-construction policy with a capacity teacher")
+    parser.add_argument("--config", default="configs/capacity_local.yaml", help="Training configuration (ignored when --resume is used).")
     parser.add_argument("--updates", type=int, help="Final update number; must exceed the resumed checkpoint update.")
     parser.add_argument("--resume", type=Path, help="Resume model and optimizer state from this training checkpoint.")
     parser.add_argument("--device", default="mps" if torch.backends.mps.is_available() else "cpu")

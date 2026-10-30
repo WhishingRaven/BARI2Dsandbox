@@ -1,0 +1,38 @@
+{
+  "samples": 200,
+  "exact_capacity_mean_kg": 7.647129322662949,
+  "predicted_capacity_mean_kg": 7.66566285431385,
+  "mae_kg": 0.22839294366538523,
+  "median_ae_kg": 0.13778597116470337,
+  "rmse_kg": 0.41254856036632465,
+  "mape_percent": 4.55167016088927,
+  "r2": 0.9938153802969272,
+  "pearson_r": 0.9969304009608903,
+  "critical_component_accuracy": 0.96,
+  "critical_edge_top1": 0.965,
+  "overprediction_fraction": 0.575,
+  "overprediction_gt_10pct_fraction": 0.085,
+  "overprediction_gt_20pct_fraction": 0.04,
+  "mean_signed_error_kg": 0.01853353165090084,
+  "max_overprediction_kg": 2.792367935180664,
+  "checkpoint": "runs/capacity/mechanics_gnn.pt",
+  "feature_mode": "mechanics_informed",
+  "payload_mode": "random",
+  "wrench_frame": "contact_local",
+  "schema_version": 2,
+  "checkpoint_stored_test_metrics": {
+    "mae_kg": 0.2343966963754338,
+    "median_ae_kg": 0.13884400647536965,
+    "mape": 0.07939970769747427,
+    "component_accuracy": 0.9702428343949044,
+    "critical_edge_top1": 0.9552149681528662
+  },
+  "dataset_metadata": {
+    "source": "procedural_held_out",
+    "seed": 20000,
+    "feature_mode": "mechanics_informed",
+    "payload_mode": "random",
+    "schema_version": 2,
+    "wrench_frame": "contact_local"
+  }
+}

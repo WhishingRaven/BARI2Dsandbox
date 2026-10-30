@@ -500,7 +500,7 @@ def parse_arguments() -> argparse.Namespace:
         help="Checkpoint path. Repeat to populate the model selector.",
     )
     parser.add_argument("--models-dir", type=Path, default=Path("runs"), help="Recursively search this directory for .pt files.")
-    parser.add_argument("--config", type=Path, default=Path("configs/baseline.yaml"), help="Fallback config for legacy checkpoints.")
+    parser.add_argument("--config", type=Path, default=Path("configs/capacity_local.yaml"), help="Fallback config for legacy checkpoints.")
     parser.add_argument("--device", default="mps" if torch.backends.mps.is_available() else "cpu")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--stage", type=int, choices=range(1, 5))

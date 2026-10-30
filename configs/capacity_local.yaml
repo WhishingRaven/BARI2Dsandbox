@@ -1,0 +1,81 @@
+# Standard training configuration: capacity teacher -> decentralized local GRU policy.
+environment:
+  seed: 7
+  episode_objective: capacity_horizon
+  curriculum_stage: 1
+  max_steps: 800
+  latent_sigma: 0.0
+  load:
+    # Used only as the curriculum/success reporting threshold. The policy reward
+    # maximizes predicted/exact bridge capacity rather than stopping at this value.
+    target_min: 10.0
+    target_max: 10.0
+    max_target: 20.0
+  reward:
+    # Small construction shaping only. Structural quality comes from the
+    # terminal capacity teacher, not the legacy graph-flow mechanical proxy.
+    span_delta: 0.25
+    mechanical_delta: 0.0
+    gap_progress: 0.10
+    time_penalty: 0.001
+    idle_penalty: 0.0
+    energy_penalty: 0.002
+    anchor_penalty: 0.001
+    robot_use_penalty: 0.0
+    collapse_penalty: 0.5
+    success_reward: 0.0
+
+model:
+  # One shared recurrent local rule. No per-robot ID/latent and no global input.
+  architecture: gru
+  branch_hidden: 32
+  fused_hidden: 64
+  recurrent_hidden: 64
+  film: false
+  use_heterogeneity: false
+
+training:
+  total_updates: 2000
+  rollout_steps: 800
+  learning_rate: 0.0003
+  gamma: 0.995
+  gae_lambda: 0.95
+  clip_ratio: 0.2
+  entropy_coef: 0.03
+  # Adds leave-one-robot-out structural credit to the shared global advantage.
+  agent_credit_coef: 1.0
+  value_coef: 0.5
+  auxiliary_coef: 0.0
+  max_grad_norm: 0.5
+  ppo_epochs: 4
+  sequence_minibatch_agents: 5
+  checkpoint_interval: 50
+  output_dir: runs/capacity_local
+  critic: graph
+  curriculum_enabled: true
+  curriculum_window: 25
+  curriculum_success_threshold: 0.7
+  curriculum_max_stage: 4
+
+  capacity_teacher:
+    enabled: true
+    # Ground-truth default. Change to `gnn` and set `checkpoint` after training
+    # a schema-v2 geometry_only CapacityGNN.
+    backend: exact
+    checkpoint: null
+    capacity_reference_kg: 20.0
+    capacity_cap_kg: 200.0
+    terminal_reward_scale: 10.0
+    no_span_penalty: -2.0
+    counterfactual_credit: true
+    counterfactual_credit_scale: 1.0
+    counterfactual_credit_clip: 2.0
+    exact_verify_rank: false
+
+    # Connector-local strength used by the teacher.
+    axial_limit: 200.0
+    shear_u_limit: 120.0
+    shear_v_limit: 120.0
+    torsion_limit: 40.0
+    bending_u_limit: 80.0
+    bending_v_limit: 80.0

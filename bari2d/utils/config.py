@@ -85,6 +85,7 @@ class RewardConfig:
 @dataclass
 class EnvironmentConfig:
     max_steps: int = 1000
+    episode_objective: str = "capacity_horizon"
     time_step: float = 0.1
     curriculum_stage: int = 1
     seed: int = 0
@@ -110,6 +111,27 @@ class ModelConfig:
 
 
 @dataclass
+class CapacityTeacherConfig:
+    enabled: bool = True
+    backend: str = "exact"
+    checkpoint: str | None = None
+    capacity_reference_kg: float = 20.0
+    capacity_cap_kg: float = 200.0
+    terminal_reward_scale: float = 10.0
+    no_span_penalty: float = -2.0
+    counterfactual_credit: bool = True
+    counterfactual_credit_scale: float = 1.0
+    counterfactual_credit_clip: float = 2.0
+    exact_verify_rank: bool = False
+    axial_limit: float = 200.0
+    shear_u_limit: float = 120.0
+    shear_v_limit: float = 120.0
+    torsion_limit: float = 40.0
+    bending_u_limit: float = 80.0
+    bending_v_limit: float = 80.0
+
+
+@dataclass
 class TrainingConfig:
     total_updates: int = 1000
     rollout_steps: int = 400
@@ -131,6 +153,7 @@ class TrainingConfig:
     curriculum_window: int = 25
     curriculum_success_threshold: float = 0.7
     curriculum_max_stage: int = 4
+    capacity_teacher: CapacityTeacherConfig = field(default_factory=CapacityTeacherConfig)
 
 
 @dataclass
